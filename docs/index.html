@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>NFT Parser</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--t1);
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+:root{
+  --bg:#0b0b0c;
+  --surface:#141416;
+  --surface2:#1c1c20;
+  --elevated:#26262b;
+  --border:rgba(255,255,255,.075);
+  --border-h:rgba(255,255,255,.16);
+  --t1:#f4f4f5;--t2:#9b9ba4;--t3:#646469;
+  --accent:#c8a27a;
+  --accent-dim:rgba(200,162,122,.13);
+  --accent-line:rgba(200,162,122,.34);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r-l:16px;--r-m:12px;--r-s:9px;
+  --sb:env(safe-area-inset-bottom,0px);
+  --nav:72px;
+  --ease:cubic-bezier(.32,.72,0,1);
+}
+.app{height:100%;display:flex;flex-direction:column;max-width:480px;margin:0 auto;position:relative;overflow:hidden;
+  border-left:1px solid var(--border);border-right:1px solid var(--border)}
+
+/* Top chrome */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:13px 16px 13px 18px;
+  border-bottom:1px solid var(--border);background:rgba(11,11,12,.76);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);z-index:60;flex-shrink:0}
+.brand{display:flex;align-items:center;gap:9px}
+.brand .mark{width:21px;height:21px;color:var(--accent)}
+.brand .mark svg{width:21px;height:21px;display:block}
+.brand .name{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.14em}
+.av{width:34px;height:34px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);
+  color:var(--t1);font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:border-color .15s,background .15s}
+.av:hover{border-color:var(--border-h);background:var(--elevated)}
+.av svg{width:18px;height:18px;stroke:var(--t2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
+  padding:0 18px;padding-bottom:calc(var(--nav) + var(--sb) + 20px)}
+.scroll::-webkit-scrollbar{display:none}
+
+/* Pages */
+.pg{display:none}
+.pg.on{display:block}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.pg.on .reveal{animation:rise .42s var(--ease) backwards}
+.pg.on .reveal:nth-child(2){animation-delay:.04s}
+.pg.on .reveal:nth-child(3){animation-delay:.08s}
+.pg.on .reveal:nth-child(4){animation-delay:.12s}
+.pg.on .reveal:nth-child(5){animation-delay:.16s}
+.pg.on .reveal:nth-child(6){animation-delay:.2s}
+.pg.on .reveal:nth-child(7){animation-delay:.24s}
+.pg.on .reveal:nth-child(8){animation-delay:.28s}
+.pg.on .reveal:nth-child(9){animation-delay:.32s}
+.pg.on .reveal:nth-child(10){animation-delay:.36s}
+
+/* Sub-pages */
+.subpg{position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:80;
+  transform:translateX(100%);transition:transform .34s var(--ease);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 18px;padding-bottom:calc(var(--nav) + var(--sb) + 20px)}
+.subpg.open{transform:translateX(0)}
+.subpg::-webkit-scrollbar{display:none}
+
+.back-btn{display:inline-flex;align-items:center;gap:6px;margin:16px 0 4px;padding:8px 14px 8px 10px;
+  cursor:pointer;font-size:13px;font-weight:600;color:var(--t2);background:var(--surface);
+  border:1px solid var(--border);border-radius:99px;transition:color .15s,border-color .15s,background .15s}
+.back-btn:hover{color:var(--t1);border-color:var(--border-h)}
+.back-btn:active{background:var(--surface2)}
+.back-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+.hdr{padding:26px 2px 4px}
+.hdr h1{font-size:25px;font-weight:700;letter-spacing:-.03em;line-height:1.15}
+.hdr p{font-size:14px;color:var(--t2);margin-top:9px;line-height:1.5;max-width:38ch}
+
+.sec{font-size:13px;font-weight:600;color:var(--t2);margin:28px 2px 12px;display:flex;align-items:baseline;gap:8px}
+.sec .hint{font-size:12px;font-weight:450;color:var(--t3);margin-left:auto}
+
+/* Hero CTA */
+.hero{display:flex;align-items:center;gap:15px;padding:18px;margin-top:20px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--accent-line);border-radius:var(--r-l);position:relative;overflow:hidden;
+  transition:transform .16s var(--ease)}
+.hero::after{content:'';position:absolute;inset:0;background:var(--accent-dim);opacity:.5;pointer-events:none}
+.hero:hover{transform:translateY(-2px)}
+.hero:active{transform:scale(.99)}
+.hero .hi{width:46px;height:46px;border-radius:12px;flex-shrink:0;z-index:1;background:var(--accent);color:#0b0b0c;display:flex;align-items:center;justify-content:center}
+.hero .hi svg{width:22px;height:22px;stroke:#0b0b0c;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hero .ht{flex:1;min-width:0;z-index:1}
+.hero .ht .a{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.hero .ht .b{font-size:12.5px;color:var(--t2);margin-top:3px}
+.hero .ha{color:var(--accent);z-index:1;display:flex}
+.hero .ha svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+/* Collection picker */
+.picker{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);padding:14px;transition:border-color .2s}
+.picker.has-sel{border-color:var(--accent-line)}
+.csearch{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-m);
+  padding:0 13px;display:flex;align-items:center;gap:10px;transition:border-color .15s}
+.csearch:focus-within{border-color:var(--accent)}
+.csearch svg{width:16px;height:16px;stroke:var(--t3);fill:none;stroke-width:2;flex-shrink:0;stroke-linecap:round;stroke-linejoin:round}
+.csearch:focus-within svg{stroke:var(--accent)}
+.csearch input{flex:1;background:none;border:none;outline:none;font-family:inherit;font-size:14.5px;color:var(--t1);padding:13px 0}
+.csearch input::placeholder{color:var(--t3)}
+.phelp{font-size:11.5px;color:var(--t3);margin:9px 2px}
+.ctable{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-m);max-height:236px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.ctable::-webkit-scrollbar{width:3px}
+.ctable::-webkit-scrollbar-track{background:transparent}
+.ctable::-webkit-scrollbar-thumb{background:var(--t3);border-radius:3px}
+.crow{display:flex;align-items:center;padding:12px 13px;cursor:pointer;transition:background .12s;border-bottom:1px solid var(--border);position:relative}
+.crow:last-child{border-bottom:none}
+.crow:hover{background:var(--elevated)}
+.crow.sel{background:var(--accent-dim)}
+.crow.sel::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent)}
+.cname{flex:1;font-size:14px;font-weight:500}
+.cnum{font-family:var(--mono);font-size:10.5px;color:var(--t3);margin-right:11px;font-weight:500}
+.ccheck{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--t3);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.crow.sel .ccheck{background:var(--accent);border-color:var(--accent)}
+.ccheck svg{width:12px;height:12px;stroke:#0b0b0c;stroke-width:3;fill:none;opacity:0;transition:opacity .15s;stroke-linecap:round;stroke-linejoin:round}
+.crow.sel .ccheck svg{opacity:1}
+.csel-bar{display:flex;align-items:center;gap:8px;padding:12px 2px 2px}
+.csel-name{font-size:13px;color:var(--accent);font-weight:600;line-height:1.4}
+.csel-name.empty{color:var(--t3);font-weight:450}
+
+/* Tile grid */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);padding:16px;cursor:pointer;
+  transition:border-color .15s,transform .16s var(--ease),background .15s;display:flex;flex-direction:column;gap:12px;min-height:112px}
+.tile:hover{border-color:var(--border-h);transform:translateY(-2px)}
+.tile:active{transform:scale(.98);background:var(--surface2)}
+.tile.wide{grid-column:1 / -1;flex-direction:row;align-items:center;min-height:0;gap:14px}
+.tico{width:38px;height:38px;border-radius:11px;flex-shrink:0;color:var(--t1);display:flex;align-items:center;justify-content:center;background:var(--surface2);border:1px solid var(--border)}
+.tile:hover .tico{border-color:var(--border-h)}
+.tico.acc{background:var(--accent-dim);border-color:var(--accent-line);color:var(--accent)}
+.tico svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tile .tt{font-size:14.5px;font-weight:600;letter-spacing:-.01em;line-height:1.25}
+.tile .td{font-size:11.5px;color:var(--t2);line-height:1.4;margin-top:3px}
+.tile.wide .tx{flex:1;min-width:0}
+.tile.wide .tarr{color:var(--t3);display:flex}
+.tile.wide .tarr svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* Grouped list */
+.list{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);overflow:hidden}
+.list:empty{display:none}
+.acard{display:flex;align-items:center;gap:13px;padding:13px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .14s}
+.acard:last-child{border-bottom:none}
+.acard:hover{background:var(--surface2)}
+.acard:active{background:var(--elevated)}
+.aico{width:38px;height:38px;border-radius:11px;flex-shrink:0;color:var(--t1);display:flex;align-items:center;justify-content:center;background:var(--surface2);border:1px solid var(--border)}
+.aico svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.atxt{flex:1;min-width:0}
+.at{font-size:14.5px;font-weight:600;letter-spacing:-.01em}
+.ad{font-size:12px;color:var(--t2);margin-top:3px;line-height:1.4}
+.arr{flex-shrink:0;color:var(--t3);display:flex;transition:color .15s,transform .15s var(--ease)}
+.arr svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.acard:hover .arr{color:var(--t2);transform:translateX(2px)}
+.cc{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--t2);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 7px;flex-shrink:0}
+
+/* Steps */
+.steps{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);overflow:hidden}
+.step{display:flex;gap:13px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.step:last-child{border-bottom:none}
+.step .sn{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);flex-shrink:0;width:18px}
+.step .st{font-size:13px;color:var(--t2);line-height:1.45}
+
+/* Cooldown trio */
+.cd-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+.cd-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-m);padding:18px 8px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s,transform .15s var(--ease)}
+.cd-card:hover{border-color:var(--border-h);background:var(--surface2)}
+.cd-card:active{transform:scale(.97)}
+.cdico{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;background:var(--surface2);border:1px solid var(--border);color:var(--t1)}
+.cdico svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cdlbl{font-size:12.5px;font-weight:600}
+.cdsub{font-size:10.5px;color:var(--t3);margin-top:4px}
+
+/* Toggle rows */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);overflow:hidden}
+.toggle{display:flex;align-items:center;gap:12px;padding:14px;cursor:pointer;border-bottom:1px solid var(--border)}
+.toggle:last-child{border-bottom:none}
+.toggle .cbx{position:absolute;opacity:0;width:0;height:0}
+.toggle-box{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--t3);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.toggle-box svg{width:12px;height:12px;stroke:#0b0b0c;stroke-width:3;fill:none;opacity:0;transition:opacity .15s;stroke-linecap:round;stroke-linejoin:round}
+.cbx:checked ~ .toggle-box{background:var(--accent);border-color:var(--accent)}
+.cbx:checked ~ .toggle-box svg{opacity:1}
+.cbx:focus-visible ~ .toggle-box{outline:2px solid var(--accent);outline-offset:2px}
+.toggle-txt .tt{font-size:14px;font-weight:600}
+.toggle-txt .td{font-size:12px;color:var(--t2);margin-top:2px;line-height:1.35}
+
+/* Pills */
+.pills{display:flex;flex-wrap:wrap;gap:7px}
+.cfilt{padding:8px 13px;border:1px solid var(--border);border-radius:99px;background:var(--surface);color:var(--t2);font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s;white-space:nowrap}
+.cfilt:hover{border-color:var(--border-h);color:var(--t1)}
+.cfilt.active{border-color:var(--accent-line);background:var(--accent-dim);color:var(--accent)}
+
+/* Confirm */
+.confirm-info{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);padding:4px 16px;margin-top:16px}
+.ci-row{display:flex;align-items:center;gap:12px;padding:15px 0}
+.ci-row:not(:last-child){border-bottom:1px solid var(--border)}
+.ci-label{font-size:12px;color:var(--t3);font-weight:500;width:96px;flex-shrink:0}
+.ci-value{font-size:14.5px;font-weight:600}
+.field-label{font-size:12.5px;font-weight:600;color:var(--t2);margin:0 2px 10px}
+.confirm-wrap{margin-top:24px}
+.confirm-btn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:16px;background:var(--t1);border:none;border-radius:var(--r-m);cursor:pointer;font-family:inherit;font-size:15px;font-weight:700;color:#0b0b0c;letter-spacing:-.01em;transition:opacity .15s,transform .15s var(--ease)}
+.confirm-btn:hover{opacity:.9}
+.confirm-btn:active{transform:scale(.985)}
+.confirm-btn svg{width:18px;height:18px;stroke:#0b0b0c;stroke-width:2.2;fill:#0b0b0c;stroke-linecap:round;stroke-linejoin:round}
+
+/* Info box */
+.infobox{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);padding:16px;margin-top:14px}
+.ibt{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--t2);margin-bottom:12px}
+.ibt svg{width:15px;height:15px;stroke:var(--t3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.irow{display:flex;align-items:flex-start;gap:9px;padding:4px 0}
+.ck{width:15px;height:15px;flex-shrink:0;margin-top:1px}
+.ck svg{width:15px;height:15px;stroke:var(--accent);stroke-width:2.4;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.irow span{font-size:12.5px;color:var(--t2);line-height:1.45}
+
+/* Profile */
+.prof-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);padding:20px 16px;display:flex;align-items:center;gap:15px;margin-top:18px}
+.prof-ava{width:56px;height:56px;border-radius:50%;background:var(--accent-dim);border:1px solid var(--accent-line);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--accent);font-size:21px;font-weight:600}
+.prof-ava svg{width:26px;height:26px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.pname{font-size:18px;font-weight:700;letter-spacing:-.01em}
+.pmeta{font-family:var(--mono);font-size:11.5px;color:var(--t2);margin-top:5px}
+
+/* Subscription card */
+.sub-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-l);padding:16px}
+.sub-card.active{border-color:var(--accent-line)}
+.sub-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sub-badge{display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:700;letter-spacing:-.01em}
+.sub-badge .dot{width:8px;height:8px;border-radius:50%;background:var(--t3)}
+.sub-card.active .sub-badge .dot{background:var(--accent)}
+.sub-meta{font-family:var(--mono);font-size:11px;color:var(--t2)}
+.sub-limit{margin-top:14px}
+.sub-bar{height:6px;border-radius:99px;background:var(--surface2);overflow:hidden;border:1px solid var(--border)}
+.sub-bar i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .3s var(--ease)}
+.sub-hint{font-size:12px;color:var(--t2);margin-top:10px;line-height:1.45}
+.sub-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:14px;padding:14px;
+  background:var(--accent);color:#0b0b0c;border:none;border-radius:var(--r-m);cursor:pointer;
+  font-family:inherit;font-size:14.5px;font-weight:700;letter-spacing:-.01em;transition:opacity .15s,transform .15s var(--ease)}
+.sub-btn:hover{opacity:.92}
+.sub-btn:active{transform:scale(.985)}
+.sub-btn svg{width:17px;height:17px;stroke:#0b0b0c;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sub-btn.secondary{background:var(--surface2);color:var(--t1);border:1px solid var(--border);margin-top:8px}
+.sub-btn.secondary svg{stroke:var(--t1)}
+
+/* Bottom nav */
+.tab-bar{position:fixed;bottom:0;left:0;right:0;height:calc(var(--nav) + var(--sb));padding:8px 10px var(--sb);
+  background:rgba(11,11,12,.85);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+  border-top:1px solid var(--border);display:flex;gap:4px;z-index:90;max-width:480px;margin:0 auto}
+.tab{flex:1;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;padding:0}
+.tab .seg{display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 0;width:100%;border-radius:13px;color:var(--t3);transition:background .18s,color .18s}
+.tab.on .seg{background:var(--accent-dim);color:var(--accent)}
+.tab svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tab span{font-size:10.5px;font-weight:600;letter-spacing:.01em}
+
+/* Toast */
+.toast{position:fixed;bottom:calc(var(--nav) + var(--sb) + 16px);left:50%;transform:translateX(-50%) translateY(8px);
+  background:var(--elevated);border:1px solid var(--border-h);border-radius:11px;padding:12px 18px;font-size:13px;font-weight:500;
+  box-shadow:0 14px 44px rgba(0,0,0,.6);opacity:0;transition:all .22s var(--ease);z-index:200;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.empty-msg{padding:18px;text-align:center;color:var(--t3);font-size:13px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.5 21 12l-9 9.5L3 12z"/><path d="M7.5 12 12 7l4.5 5-4.5 5z" stroke-width="1.2"/></svg></span>
+      <span class="name">NFT&nbsp;PARSER</span>
+    </div>
+    <button class="av" id="topav" onclick="go('profile')" aria-label="Профиль">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>
+    </button>
+  </header>
+
+  <div class="scroll" id="main-scroll">
+
+    <!-- ===== HOME ===== -->
+    <div class="pg on" id="pg-home">
+      <div class="hdr reveal">
+        <h1>Парсинг владельцев Telegram-подарков</h1>
+        <p>Поиск по стране, типу аккаунта и статусу кулдауна. Результаты приходят в чат.</p>
+      </div>
+
+      <div class="hero reveal" onclick="go('parser')">
+        <div class="hi"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg></div>
+        <div class="ht"><div class="a">Начать парсинг</div><div class="b">Выбрать коллекцию и способ поиска</div></div>
+        <div class="ha"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+
+      <div class="sec reveal">Готовые сценарии</div>
+      <div class="grid reveal">
+        <div class="tile" onclick="openSub('cooldown')">
+          <div class="tico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg></div>
+          <div><div class="tt">Кулдаун-фильтр</div><div class="td">Без КД · скоро · на КД</div></div>
+        </div>
+        <div class="tile" onclick="openSub('market')">
+          <div class="tico"><svg viewBox="0 0 24 24"><path d="M6 2 3 6v13a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></div>
+          <div><div class="tt">Маркет Telegram</div><div class="td">Лоты за звёзды</div></div>
+        </div>
+      </div>
+
+      <div class="sec reveal">Как это работает</div>
+      <div class="steps reveal">
+        <div class="step"><div class="sn">1</div><div class="st">Выберите коллекцию подарка</div></div>
+        <div class="step"><div class="sn">2</div><div class="st">Нажмите нужный фильтр — откроется подтверждение</div></div>
+        <div class="step"><div class="sn">3</div><div class="st">Запустите парсинг — результаты придут в чат</div></div>
+      </div>
+    </div>
+
+    <!-- ===== PARSER ===== -->
+    <div class="pg" id="pg-parser">
+      <div class="hdr reveal"><h1>Парсинг</h1><p>Шаг 1 — коллекция. Шаг 2 — способ поиска.</p></div>
+
+      <div class="sec reveal">Коллекция<span class="hint" id="coll-help"></span></div>
+      <div class="picker reveal" id="gift-picker">
+        <div class="csearch">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="gift-search" placeholder="Найдите подарок…" autocomplete="off">
+        </div>
+        <div class="ctable" id="gift-list"></div>
+        <div class="csel-bar"><div class="csel-name empty" id="sel-label">Подарок не выбран</div></div>
+      </div>
+
+      <div class="sec reveal">Поиск по владельцу</div>
+      <div class="grid reveal">
+        <div class="tile" onclick="openSub('country-pick')">
+          <div class="tico acc"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/></svg></div>
+          <div><div class="tt">По стране</div><div class="td">12 национальностей</div></div>
+        </div>
+        <div class="tile" onclick="confirmAction('girls')">
+          <div class="tico"><svg viewBox="0 0 24 24"><path d="M12 2v3M10 4l2-2 2 2"/><circle cx="12" cy="12" r="5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></div>
+          <div><div class="tt">AI-девушки</div><div class="td">Женские аккаунты</div></div>
+        </div>
+        <div class="tile" onclick="confirmAction('random')">
+          <div class="tico"><svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg></div>
+          <div><div class="tt">Случайный</div><div class="td">Любые владельцы</div></div>
+        </div>
+        <div class="tile" onclick="confirmAction('original')">
+          <div class="tico"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+          <div><div class="tt">Не передавались</div><div class="td">Оригин. владелец</div></div>
+        </div>
+      </div>
+
+      <div class="sec reveal">Сценарии</div>
+      <div class="grid reveal">
+        <div class="tile wide" onclick="openSub('combo')">
+          <div class="tico acc"><svg viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="8" cy="18" r="2" fill="currentColor" stroke="none"/></svg></div>
+          <div class="tx"><div class="tt">Комбо-поиск</div><div class="td">Несколько коллекций и фильтров сразу</div></div>
+          <div class="tarr"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
+        </div>
+        <div class="tile" onclick="openSub('cooldown')">
+          <div class="tico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg></div>
+          <div><div class="tt">Кулдаун</div><div class="td">По статусу КД</div></div>
+        </div>
+        <div class="tile" onclick="openSub('market')">
+          <div class="tico"><svg viewBox="0 0 24 24"><path d="M6 2 3 6v13a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></div>
+          <div><div class="tt">Маркет</div><div class="td">Лоты за звёзды</div></div>
+        </div>
+      </div>
+
+      <div class="sec reveal">Fragment · TON</div>
+      <div class="grid reveal">
+        <div class="tile" onclick="sendAction('numbers')">
+          <div class="tico"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><line x1="11" y1="18" x2="13" y2="18"/></svg></div>
+          <div><div class="tt">+888 номера</div><div class="td">Виртуальные номера</div></div>
+        </div>
+        <div class="tile" onclick="sendAction('nft_usernames')">
+          <div class="tico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1"/></svg></div>
+          <div><div class="tt">NFT юзернеймы</div><div class="td">Из TON блокчейна</div></div>
+        </div>
+      </div>
+
+      <div class="sec reveal">Неулучшенные подарки</div>
+      <div class="list reveal" id="non-upgraded-section"></div>
+
+      <div class="sec reveal">Управление</div>
+      <div class="list reveal">
+        <div class="acard" onclick="sendAction('reset_viewed')">
+          <div class="aico"><svg viewBox="0 0 24 24"><path d="M3 10a9 9 0 1 1 1.6 6"/><polyline points="3 4 3 10 9 10"/></svg></div>
+          <div class="atxt"><div class="at">Сбросить просмотренных</div><div class="ad">Очистить историю — парсинг покажет всех заново</div></div>
+          <div class="arr"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PROFILE ===== -->
+    <div class="pg" id="pg-profile">
+      <div class="hdr reveal"><h1>Профиль</h1></div>
+      <div class="prof-card reveal">
+        <div class="prof-ava" id="p-ava"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></div>
+        <div><div class="pname" id="p-name">Пользователь</div><div class="pmeta" id="p-meta">Telegram</div></div>
+      </div>
+
+      <div class="sec reveal">Подписка</div>
+      <div class="sub-card reveal" id="sub-card">
+        <div class="sub-top">
+          <div class="sub-badge"><span class="dot"></span><span id="sub-badge-text">Загрузка…</span></div>
+          <div class="sub-meta" id="sub-meta"></div>
+        </div>
+        <div class="sub-limit" id="sub-limit" style="display:none">
+          <div class="sub-bar"><i id="sub-bar" style="width:0%"></i></div>
+        </div>
+        <div class="sub-hint" id="sub-hint">Проверяем статус доступа…</div>
+        <button class="sub-btn" id="sub-buy" onclick="buySub()" style="display:none">
+          <svg viewBox="0 0 24 24"><path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z"/></svg>
+          <span id="sub-buy-text">Купить подписку</span>
+        </button>
+        <button class="sub-btn secondary" id="sub-status" onclick="openStatusBot()" style="display:none">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          Подробнее в боте
+        </button>
+      </div>
+
+      <div class="sec reveal">Управление</div>
+      <div class="list reveal">
+        <div class="acard" onclick="sendAction('reset_viewed')">
+          <div class="aico"><svg viewBox="0 0 24 24"><path d="M3 10a9 9 0 1 1 1.6 6"/><polyline points="3 4 3 10 9 10"/></svg></div>
+          <div class="atxt"><div class="at">Сбросить просмотренных</div><div class="ad">Удалить всю историю парсинга и начать заново</div></div>
+          <div class="arr"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
+        </div>
+      </div>
+
+      <div class="sec reveal">Как это работает</div>
+      <div class="steps reveal">
+        <div class="step"><div class="sn">1</div><div class="st">Выберите коллекцию подарка</div></div>
+        <div class="step"><div class="sn">2</div><div class="st">Нажмите нужный фильтр — откроется подтверждение</div></div>
+        <div class="step"><div class="sn">3</div><div class="st">Запустите парсинг — результаты придут в чат</div></div>
+      </div>
+    </div>
+
+  </div><!-- /scroll -->
+
+  <!-- ===== SUB: COMBO ===== -->
+  <div class="subpg" id="sub-combo">
+    <div class="back-btn" onclick="closeSub()"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Назад</div>
+    <div class="hdr" style="padding-top:6px"><h1>Комбо-поиск</h1><p>Несколько коллекций и фильтров сразу — логика «И».</p></div>
+
+    <div class="field-label" style="margin-top:18px">Коллекции · до 6</div>
+    <div class="picker">
+      <div class="csearch">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="combo-gift-search" placeholder="Найдите подарок…" autocomplete="off">
+      </div>
+      <div class="ctable" id="combo-gift-list" style="margin-top:9px"></div>
+      <div class="csel-bar"><div class="csel-name empty" id="combo-sel-label">Ничего не выбрано</div></div>
+    </div>
+
+    <div class="field-label" style="margin-top:20px">Фильтры</div>
+    <div class="panel">
+      <label class="toggle">
+        <input type="checkbox" id="combo-girls" class="cbx">
+        <span class="toggle-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        <span class="toggle-txt"><span class="tt">Только девушки</span><span class="td">AI определяет женские аккаунты</span></span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="combo-orig" class="cbx">
+        <span class="toggle-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        <span class="toggle-txt"><span class="tt">Никогда не передавались</span><span class="td">Только оригинальные владельцы</span></span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="combo-market" class="cbx">
+        <span class="toggle-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+        <span class="toggle-txt"><span class="tt">Только на маркете</span><span class="td">Лоты, выставленные за звёзды</span></span>
+      </label>
+    </div>
+
+    <div class="field-label" style="margin-top:20px">Страна владельца</div>
+    <div class="pills">
+      <button class="cfilt combo-cf active" data-country="all" onclick="setComboCountry(this)">Любая</button>
+      <button class="cfilt combo-cf" data-country="cn" onclick="setComboCountry(this)">Китай</button>
+      <button class="cfilt combo-cf" data-country="ru" onclick="setComboCountry(this)">Россия</button>
+      <button class="cfilt combo-cf" data-country="uz" onclick="setComboCountry(this)">Узбекистан</button>
+      <button class="cfilt combo-cf" data-country="kz" onclick="setComboCountry(this)">Казахстан</button>
+      <button class="cfilt combo-cf" data-country="in" onclick="setComboCountry(this)">Индия</button>
+      <button class="cfilt combo-cf" data-country="ar" onclick="setComboCountry(this)">Арабы</button>
+      <button class="cfilt combo-cf" data-country="id" onclick="setComboCountry(this)">Индонезия</button>
+      <button class="cfilt combo-cf" data-country="jp" onclick="setComboCountry(this)">Япония</button>
+      <button class="cfilt combo-cf" data-country="kr" onclick="setComboCountry(this)">Корея</button>
+      <button class="cfilt combo-cf" data-country="tr" onclick="setComboCountry(this)">Турция</button>
+    </div>
+
+    <div class="confirm-wrap">
+      <button class="confirm-btn" onclick="runCombo()"><svg viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg>Искать</button>
+    </div>
+  </div>
+
+  <!-- ===== SUB: COUNTRY PICKER ===== -->
+  <div class="subpg" id="sub-country-pick">
+    <div class="back-btn" onclick="closeSub()"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Назад</div>
+    <div class="hdr" style="padding-top:6px"><h1>По стране</h1><p>Выберите национальность владельца.</p></div>
+    <div class="list" style="margin-top:16px" id="country-cards"></div>
+  </div>
+
+  <!-- ===== SUB: MARKET COUNTRY ===== -->
+  <div class="subpg" id="sub-market-country">
+    <div class="back-btn" onclick="closeSub()"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Назад</div>
+    <div class="hdr" style="padding-top:6px"><h1>Маркет · по стране</h1><p>Подарки от выбранной страны за звёзды.</p></div>
+    <div class="list" style="margin-top:16px" id="market-country-cards"></div>
+  </div>
+
+  <!-- ===== SUB: CONFIRM ===== -->
+  <div class="subpg" id="sub-confirm">
+    <div class="back-btn" onclick="closeSub()"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Назад</div>
+    <div class="hdr" style="padding-top:6px"><h1 id="confirm-title">Подтверждение</h1><p id="confirm-desc">Проверьте настройки и запустите парсинг.</p></div>
+
+    <div class="confirm-info">
+      <div class="ci-row"><div class="ci-label">Коллекция</div><div class="ci-value" id="confirm-gift">—</div></div>
+      <div class="ci-row"><div class="ci-label">Фильтр</div><div class="ci-value" id="confirm-filter">—</div></div>
+    </div>
+
+    <div id="confirm-country-wrap" style="display:none;margin-top:18px">
+      <div class="field-label">Национальность</div>
+      <div class="pills">
+        <button class="cfilt active" data-country="all" onclick="setCountry(this)">Все</button>
+        <button class="cfilt" data-country="cn" onclick="setCountry(this)">Китай</button>
+        <button class="cfilt" data-country="ru" onclick="setCountry(this)">Россия</button>
+        <button class="cfilt" data-country="uz" onclick="setCountry(this)">Узбекистан</button>
+        <button class="cfilt" data-country="kz" onclick="setCountry(this)">Казахстан</button>
+        <button class="cfilt" data-country="in" onclick="setCountry(this)">Индия</button>
+        <button class="cfilt" data-country="ar" onclick="setCountry(this)">Арабы</button>
+        <button class="cfilt" data-country="id" onclick="setCountry(this)">Индонезия</button>
+        <button class="cfilt" data-country="jp" onclick="setCountry(this)">Япония</button>
+        <button class="cfilt" data-country="kr" onclick="setCountry(this)">Корея</button>
+        <button class="cfilt" data-country="tr" onclick="setCountry(this)">Турция</button>
+      </div>
+    </div>
+
+    <div id="confirm-orig-wrap" style="display:none;margin-top:18px">
+      <div class="panel">
+        <label class="toggle">
+          <input type="checkbox" id="confirm-orig-cb" class="cbx">
+          <span class="toggle-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span class="toggle-txt"><span class="tt">Только никогда не передавались</span></span>
+        </label>
+      </div>
+    </div>
+
+    <div id="confirm-anygift-wrap" style="display:none;margin-top:18px">
+      <div class="panel">
+        <label class="toggle">
+          <input type="checkbox" id="confirm-anygift-cb" class="cbx" onchange="onAnyGiftToggle()">
+          <span class="toggle-box"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <span class="toggle-txt"><span class="tt">Любой подарок</span><span class="td">Искать по всем коллекциям</span></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="confirm-wrap">
+      <button class="confirm-btn" id="confirm-go-btn" onclick="doConfirmedAction()"><svg viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg>Начать парсинг</button>
+    </div>
+
+    <div class="infobox" style="margin-top:16px">
+      <div class="ibt"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>Что произойдёт</div>
+      <div class="irow"><div class="ck"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span>Мини-приложение закроется</span></div>
+      <div class="irow"><div class="ck"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span>Бот начнёт парсинг через API</span></div>
+      <div class="irow"><div class="ck"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span>Результаты придут прямо в чат</span></div>
+    </div>
+  </div>
+
+  <!-- ===== SUB: COOLDOWN ===== -->
+  <div class="subpg" id="sub-cooldown">
+    <div class="back-btn" onclick="closeSub()"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Назад</div>
+    <div class="hdr" style="padding-top:6px"><h1>Кулдаун</h1><p>Поиск по статусу кулдауна после улучшения или передачи.</p></div>
+
+    <div class="field-label" style="margin-top:18px">Коллекция</div>
+    <div class="picker">
+      <div class="csearch">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" class="sub-gift-search" placeholder="Найдите подарок…" autocomplete="off">
+      </div>
+      <div class="ctable sub-gift-list" style="margin-top:9px"></div>
+      <div class="csel-bar"><div class="csel-name empty sub-sel-label">Подарок не выбран</div></div>
+    </div>
+
+    <div class="sec">Статус кулдауна</div>
+    <div class="cd-grid">
+      <div class="cd-card" onclick="confirmAction('cd_free')">
+        <div class="cdico"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="cdlbl">Без КД</div><div class="cdsub">можно передать</div>
+      </div>
+      <div class="cd-card" onclick="confirmAction('cd_soon')">
+        <div class="cdico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg></div>
+        <div class="cdlbl">Скоро</div><div class="cdsub">1–2 дня</div>
+      </div>
+      <div class="cd-card" onclick="confirmAction('cd_active')">
+        <div class="cdico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>
+        <div class="cdlbl">На КД</div><div class="cdsub">ждём снятия</div>
+      </div>
+    </div>
+
+    <div class="infobox">
+      <div class="ibt"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>Что такое кулдаун</div>
+      <div class="irow"><div class="ck"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span>После улучшения подарок нельзя передать 7 дней</span></div>
+      <div class="irow"><div class="ck"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span>«Без КД» — кулдаун прошёл, можно передать</span></div>
+      <div class="irow"><div class="ck"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span>«Скоро» — осталось 1–2 дня до снятия</span></div>
+    </div>
+  </div>
+
+  <!-- ===== SUB: MARKET ===== -->
+  <div class="subpg" id="sub-market">
+    <div class="back-btn" onclick="closeSub()"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>Назад</div>
+    <div class="hdr" style="padding-top:6px"><h1>Маркет</h1><p>Подарки на внутреннем маркете Telegram за звёзды.</p></div>
+
+    <div class="field-label" style="margin-top:18px">Коллекция</div>
+    <div class="picker">
+      <div class="csearch">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" class="sub-gift-search" placeholder="Найдите подарок…" autocomplete="off">
+      </div>
+      <div class="ctable sub-gift-list" style="margin-top:9px"></div>
+      <div class="csel-bar"><div class="csel-name empty sub-sel-label">Подарок не выбран</div></div>
+    </div>
+
+    <div class="sec">Фильтр маркета</div>
+    <div class="list">
+      <div class="acard" onclick="openSub('market-country')">
+        <div class="aico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/></svg></div>
+        <div class="atxt"><div class="at">По стране</div><div class="ad">Подарки от выбранной страны за звёзды</div></div>
+        <div class="arr"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+      <div class="acard" onclick="confirmAction('market_all')">
+        <div class="aico"><svg viewBox="0 0 24 24"><path d="M6 2 3 6v13a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg></div>
+        <div class="atxt"><div class="at">Все лоты на маркете</div><div class="ad">Все подарки на продаже внутри Telegram</div></div>
+        <div class="arr"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== BOTTOM NAV ===== -->
+  <nav class="tab-bar">
+    <button class="tab on" onclick="go('home')"><span class="seg"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg><span>Главная</span></span></button>
+    <button class="tab" onclick="go('parser')"><span class="seg"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg><span>Парсинг</span></span></button>
+    <button class="tab" onclick="go('profile')"><span class="seg"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg><span>Профиль</span></span></button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const tg=window.Telegram?.WebApp;
+if(tg){tg.ready();tg.expand();tg.setHeaderColor('#0b0b0c');tg.setBackgroundColor('#0b0b0c');
+  const u=tg.initDataUnsafe?.user;
+  if(u){
+    const full=[u.first_name,u.last_name].filter(Boolean).join(' ');
+    document.getElementById('p-name').textContent=full||'Пользователь';
+    document.getElementById('p-meta').textContent=u.username?`@${u.username}  ·  ID ${u.id}`:`ID ${u.id}`;
+    const init=((u.first_name||'?').trim()[0]||'?').toUpperCase();
+    const topav=document.getElementById('topav');if(topav)topav.textContent=init;
+    const pava=document.getElementById('p-ava');if(pava)pava.textContent=init;
+  }
+}
+
+// === ALL 106 REAL GIFTS FROM peek.tg ===
+const GIFTS=["Artisan Brick","Astral Shard","B-Day Candle","Berry Box","Big Year","Bling Binky","Bonded Ring","Bow Tie","Bunny Muffin","Candy Cane","Clover Pin","Cookie Heart","Crystal Ball","Cupid Charm","Desk Calendar","Diamond Ring","Durov's Cap","Easter Egg","Electric Skull","Eternal Candle","Eternal Rose","Evil Eye","Faith Amulet","Flying Broom","Fresh Socks","Gem Signet","Genie Lamp","Ginger Cookie","Hanging Star","Happy Brownie","Heart Locket","Heroic Helmet","Hex Pot","Holiday Drink","Homemade Cake","Hypno Lollipop","Ice Cream","Input Key","Instant Ramen","Ion Gem","Ionic Dryer","Jack in the Box","Jelly Bunny","Jester Hat","Jingle Bells","Jolly Chimp","Joyful Bundle","Khabib's Papakha","Kissed Frog","Light Sword","Lol Pop","Loot Bag","Love Candle","Love Potion","Low Rider","Lunar Snake","Lush Bouquet","Mad Pumpkin","Magic Potion","Mighty Arm","Mini Oscar","Money Pot","Moon Pendant","Mousse Cake","Nail Bracelet","Neko Helmet","Party Sparkler","Perfume Bottle","Pet Snake","Plush Pepe","Precious Peach","Pretty Posy","Record Player","Restless Jar","Sakura Flower","Santa Hat","Scared Cat","Sharp Tongue","Signet Ring","Skull Flower","Sky Stilettos","Sleigh Bell","Snake Box","Snoop Cigar","Snoop Dogg","Snow Globe","Snow Mittens","Spiced Wine","Spring Basket","Spy Agaric","Star Notepad","Stellar Rocket","Swag Bag","Swiss Watch","Tama Gadget","Top Hat","Toy Bear","Trapped Heart","Valentine Box","Vintage Cigar","Voodoo Doll","Westside Sign","Whip Cupcake","Winter Wreath","Witch Hat","Xmas Stocking"];
+
+let selectedGift=null;
+let pendingAction=null;
+
+const COUNTRIES=[
+  {code:'cn',name:'Китай',desc:'Иероглифы в имени'},
+  {code:'ru',name:'Россия',desc:'Кириллица в имени'},
+  {code:'uz',name:'Узбекистан',desc:'Узбекские имена'},
+  {code:'kz',name:'Казахстан',desc:'Казахские имена'},
+  {code:'in',name:'Индия',desc:'Индийские скрипты и имена'},
+  {code:'ar',name:'Арабы',desc:'Арабское письмо'},
+  {code:'id',name:'Индонезия',desc:'Индонезийские имена'},
+  {code:'jp',name:'Япония',desc:'Хирагана / катакана'},
+  {code:'kr',name:'Корея',desc:'Хангыль в имени'},
+  {code:'tr',name:'Турция',desc:'Турецкие имена'},
+];
+
+const ACTION_LABELS={
+  girls:'AI-поиск девушек',
+  random:'Случайный поиск',
+  original:'Оригинальные владельцы',
+  market_all:'Маркет: все лоты',
+  cd_free:'Без кулдауна',
+  cd_soon:'Скоро снятие КД',
+  cd_active:'На кулдауне',
+};
+const ACTION_DESCS={
+  girls:'AI проверит имена и определит женские аккаунты',
+  random:'Бот выдаст случайных владельцев из этой коллекции',
+  original:'Бот найдёт подарки, которые никогда не передавались',
+  market_all:'Все подарки на продаже на внутреннем маркете Telegram',
+  cd_free:'Подарки, у которых кулдаун уже прошёл — можно передать',
+  cd_soon:'Подарки, у которых кулдаун снимется через 1–2 дня',
+  cd_active:'Подарки, которые сейчас на кулдауне',
+};
+COUNTRIES.forEach(c=>{
+  ACTION_LABELS['country_'+c.code]='Поиск: '+c.name;
+  ACTION_DESCS['country_'+c.code]='Бот найдёт владельцев — '+c.desc;
+  ACTION_LABELS['market_'+c.code]='Маркет: '+c.name;
+  ACTION_DESCS['market_'+c.code]='Подарки от '+c.name+' за звёзды';
+});
+ACTION_LABELS.chinese='Поиск китайцев';
+ACTION_LABELS.russian='Поиск русских';
+ACTION_LABELS.market_chinese='Маркет: китайцы';
+ACTION_LABELS.market_russian='Маркет: русские';
+ACTION_DESCS.chinese='Бот найдёт всех владельцев с китайскими иероглифами в имени';
+ACTION_DESCS.russian='Бот найдёт всех владельцев с кириллицей в имени';
+ACTION_DESCS.market_chinese='Подарки от китайцев, выставленные за звёзды на маркете';
+ACTION_DESCS.market_russian='Подарки от русских, выставленные за звёзды на маркете';
+
+const CHECK_SVG='<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function syncPickerState(){
+  document.querySelectorAll('.picker').forEach(p=>{
+    p.classList.toggle('has-sel', !!selectedGift && !!p.querySelector('.sub-sel-label,#sel-label'));
+  });
+}
+
+function renderGifts(filter=''){
+  const el=document.getElementById('gift-list');
+  const f=filter.toLowerCase();
+  const filtered=GIFTS.map((g,i)=>({name:g,i})).filter(x=>!f||x.name.toLowerCase().includes(f));
+  el.innerHTML=filtered.map(x=>`
+    <div class="crow${selectedGift===x.name?' sel':''}" onclick="pickGift('${x.name.replace(/'/g,"\\'")}')">
+      <div class="cname">${x.name}</div>
+      <div class="cnum">#${x.i+1}</div>
+      <div class="ccheck">${CHECK_SVG}</div>
+    </div>`).join('');
+  if(!filtered.length) el.innerHTML='<div class="empty-msg">Ничего не найдено</div>';
+}
+
+function pickGift(name){
+  selectedGift=selectedGift===name?null:name;
+  updateSelLabel(document.getElementById('sel-label'));
+  renderGifts(document.getElementById('gift-search').value);
+  document.querySelectorAll('.sub-sel-label').forEach(l=>updateSelLabel(l));
+  document.querySelectorAll('.sub-gift-list').forEach(el=>renderSubGifts(el,el.closest('.subpg').querySelector('.sub-gift-search')?.value||''));
+  syncPickerState();
+  if(tg)tg.HapticFeedback?.impactOccurred('light');
+}
+
+function pickGiftSub(name,listEl,labelEl,searchEl){
+  selectedGift=selectedGift===name?null:name;
+  updateSelLabel(labelEl);
+  updateSelLabel(document.getElementById('sel-label'));
+  renderSubGifts(listEl,searchEl.value);
+  renderGifts(document.getElementById('gift-search').value);
+  syncPickerState();
+  if(tg)tg.HapticFeedback?.impactOccurred('light');
+}
+
+function updateSelLabel(el){
+  if(!el)return;
+  if(selectedGift){el.textContent='Выбрано: '+selectedGift;el.classList.remove('empty')}
+  else{el.textContent='Подарок не выбран';el.classList.add('empty')}
+}
+
+function renderSubGifts(listEl,filter){
+  const f=(filter||'').toLowerCase();
+  const filtered=GIFTS.map((g,i)=>({name:g,i})).filter(x=>!f||x.name.toLowerCase().includes(f));
+  listEl.innerHTML=filtered.map(x=>`
+    <div class="crow${selectedGift===x.name?' sel':''}" onclick="pickGiftSub('${x.name.replace(/'/g,"\\'")}',this.closest('.ctable'),this.closest('.picker').querySelector('.sub-sel-label'),this.closest('.picker').querySelector('.sub-gift-search'))">
+      <div class="cname">${x.name}</div>
+      <div class="cnum">#${x.i+1}</div>
+      <div class="ccheck">${CHECK_SVG}</div>
+    </div>`).join('');
+  if(!filtered.length) listEl.innerHTML='<div class="empty-msg">Ничего не найдено</div>';
+}
+
+document.getElementById('gift-search').addEventListener('input',e=>renderGifts(e.target.value));
+document.querySelectorAll('.sub-gift-search').forEach(inp=>{
+  inp.addEventListener('input',e=>{
+    const listEl=e.target.closest('.picker').querySelector('.sub-gift-list');
+    renderSubGifts(listEl,e.target.value);
+  });
+});
+
+renderGifts();
+document.querySelectorAll('.sub-gift-list').forEach(el=>renderSubGifts(el,''));
+(function(){const h=document.getElementById('coll-help');if(h)h.textContent=GIFTS.length+' коллекций';})();
+
+// === NAV ===
+const tabs=document.querySelectorAll('.tab');
+const pgs=document.querySelectorAll('.pg');
+
+function go(name){
+  closeSub();
+  tabs.forEach(t=>t.classList.remove('on'));
+  pgs.forEach(p=>p.classList.remove('on'));
+  const idx={home:0,parser:1,profile:2}[name]??0;
+  tabs[idx].classList.add('on');
+  document.getElementById('pg-'+name).classList.add('on');
+  document.getElementById('main-scroll').scrollTop=0;
+  if(name==='profile')loadStatus();
+  if(tg)tg.HapticFeedback?.impactOccurred('light');
+}
+
+// Sub-pages
+function openSub(name){
+  const el=document.getElementById('sub-'+name);
+  if(el){el.classList.add('open');el.scrollTop=0;
+    const listEl=el.querySelector('.sub-gift-list');
+    const searchEl=el.querySelector('.sub-gift-search');
+    if(listEl)renderSubGifts(listEl,searchEl?.value||'');
+    const label=el.querySelector('.sub-sel-label');
+    if(label)updateSelLabel(label);
+    syncPickerState();
+    if(name==='combo')renderComboGifts(document.getElementById('combo-gift-search')?.value||'');
+  }
+  if(tg)tg.HapticFeedback?.impactOccurred('light');
+}
+function closeSub(){
+  document.querySelectorAll('.subpg').forEach(s=>s.classList.remove('open'));
+  if(tg)tg.HapticFeedback?.impactOccurred('light');
+}
+
+// === DEEP LINK HELPERS ===
+function getBotUsername(){
+  const p=new URLSearchParams(window.location.search);
+  return p.get('bot')||'MamanMom67_bot';
+}
+function toApiName(n){return n.replace(/[\s\-’']/g,'');}
+function deepLink(param){
+  if(!tg)return;
+  var bot=getBotUsername();
+  var url='https://t.me/'+bot+'?start='+param;
+  try{tg.openTelegramLink(url)}catch(e){window.open(url,'_blank')}
+  tg.close();
+}
+
+let selectedCountry='all';
+function setCountry(btn){
+  document.querySelectorAll('#confirm-country-wrap .cfilt').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  selectedCountry=btn.dataset.country;
+  if(tg)tg.HapticFeedback?.selectionChanged();
+}
+
+(function(){
+  const globe='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/></svg>';
+  const arr='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+  var h='';
+  COUNTRIES.forEach(c=>{
+    h+=`<div class="acard" onclick="confirmAction('country_${c.code}')">
+      <div class="aico">${globe}</div>
+      <div class="atxt"><div class="at">${c.name}</div><div class="ad">${c.desc}</div></div>
+      <span class="cc">${c.code.toUpperCase()}</span>
+      <div class="arr">${arr}</div></div>`;
+  });
+  var el=document.getElementById('country-cards');
+  if(el)el.innerHTML=h;
+  var mh='';
+  COUNTRIES.forEach(c=>{
+    mh+=`<div class="acard" onclick="confirmAction('market_${c.code}')">
+      <div class="aico">${globe}</div>
+      <div class="atxt"><div class="at">${c.name}</div><div class="ad">Подарки от ${c.name} за звёзды</div></div>
+      <span class="cc">${c.code.toUpperCase()}</span>
+      <div class="arr">${arr}</div></div>`;
+  });
+  var mel=document.getElementById('market-country-cards');
+  if(mel)mel.innerHTML=mh;
+})();
+
+const COUNTRY_ACTIONS=new Set(['girls','cd_free','cd_soon','cd_active','random']);
+const ORIG_ACTIONS=new Set(['random']);
+const ANYGIFT_ACTIONS=new Set(['country']);
+
+function _resetConfirmOptions(){
+  selectedCountry='all';
+  document.querySelectorAll('#confirm-country-wrap .cfilt').forEach(b=>{b.classList.toggle('active',b.dataset.country==='all')});
+  const origCb=document.getElementById('confirm-orig-cb');
+  if(origCb)origCb.checked=false;
+  const anyCb=document.getElementById('confirm-anygift-cb');
+  if(anyCb)anyCb.checked=false;
+}
+
+function onAnyGiftToggle(){
+  const anyCb=document.getElementById('confirm-anygift-cb');
+  const gEl=document.getElementById('confirm-gift');
+  if(!anyCb||!gEl)return;
+  gEl.textContent=anyCb.checked?'Все коллекции':(selectedGift||'—');
+}
+
+function confirmAction(action){
+  if(action==='random'){
+    pendingAction=action;
+    document.getElementById('confirm-title').textContent=ACTION_LABELS[action]||action;
+    document.getElementById('confirm-desc').textContent=ACTION_DESCS[action]||'';
+    document.getElementById('confirm-gift').textContent='Все коллекции';
+    document.getElementById('confirm-filter').textContent=ACTION_LABELS[action]||action;
+  } else {
+    const baseAct=action.replace(/_[a-z]{2}$/,'').replace(/_/g,'');
+    const anyGiftOk=ANYGIFT_ACTIONS.has(baseAct);
+    if(!selectedGift && !anyGiftOk){
+      showToast('Сначала выберите коллекцию');
+      if(tg)tg.HapticFeedback?.notificationOccurred('warning');
+      return;
+    }
+    pendingAction=action;
+    document.getElementById('confirm-title').textContent=ACTION_LABELS[action]||action;
+    document.getElementById('confirm-desc').textContent=ACTION_DESCS[action]||'';
+    document.getElementById('confirm-gift').textContent=selectedGift||'Все коллекции';
+    document.getElementById('confirm-filter').textContent=ACTION_LABELS[action]||action;
+  }
+
+  _resetConfirmOptions();
+  const baseAct2=action.replace(/_[a-z]{2}$/,'').replace(/_/g,'');
+  document.getElementById('confirm-country-wrap').style.display=COUNTRY_ACTIONS.has(action)?'':'none';
+  document.getElementById('confirm-orig-wrap').style.display=ORIG_ACTIONS.has(action)?'':'none';
+  const anyWrap=document.getElementById('confirm-anygift-wrap');
+  if(anyWrap)anyWrap.style.display=ANYGIFT_ACTIONS.has(baseAct2)?'':'none';
+  const anyCb=document.getElementById('confirm-anygift-cb');
+  if(anyCb&&ANYGIFT_ACTIONS.has(baseAct2)&&!selectedGift){anyCb.checked=true;onAnyGiftToggle();}
+
+  document.querySelectorAll('.subpg').forEach(s=>{if(s.id!=='sub-confirm')s.classList.remove('open')});
+  openSub('confirm');
+  if(tg)tg.HapticFeedback?.impactOccurred('medium');
+}
+
+function doConfirmedAction(){
+  if(!pendingAction)return;
+  if(tg)tg.HapticFeedback?.impactOccurred('heavy');
+
+  const anyCb=document.getElementById('confirm-anygift-cb');
+  const baseAct=pendingAction.replace(/_[a-z]{2}$/,'').replace(/_/g,'');
+  if(anyCb&&anyCb.checked&&ANYGIFT_ACTIONS.has(baseAct)){
+    const m=pendingAction.match(/_([a-z]{2})$/);
+    const cc=(m&&m[1]!=='al')?m[1]:'';
+    deepLink('random'+cc);
+    return;
+  }
+
+  let suffix='';
+  if(COUNTRY_ACTIONS.has(pendingAction)&&selectedCountry!=='all'){
+    suffix+=selectedCountry;
+  }
+  const origCb=document.getElementById('confirm-orig-cb');
+  if(ORIG_ACTIONS.has(pendingAction)&&origCb&&origCb.checked){
+    suffix+='orig';
+  }
+
+  const safeAction=pendingAction.replace(/_/g,'')+suffix;
+
+  if(pendingAction==='random'){
+    deepLink(safeAction);
+    return;
+  }
+  if(!selectedGift)return;
+  deepLink(safeAction+'__'+toApiName(selectedGift));
+}
+
+function sendAction(action){
+  if(tg)tg.HapticFeedback?.impactOccurred('medium');
+  if(action==='reset_viewed'||action==='numbers'||action==='nft_usernames'){
+    deepLink(action);
+    return;
+  }
+  if(!selectedGift){showToast('Сначала выберите коллекцию');if(tg)tg.HapticFeedback?.notificationOccurred('warning');return;}
+  const safeAction=action.replace(/_/g,'');
+  deepLink(safeAction+'__'+toApiName(selectedGift));
+}
+
+// Неулучшенные подарки
+(function(){
+  const popular=['Plush Pepe','Durov','Homunculus','Jelly Bunny','Perfume Bottle','Vintage Cigar','Sakura Flower','Electric Skull','Diamond Ring','Signet Ring','Love Potion','Astral Shard','Hypno Lollipop','Mad Pumpkin','Crystal Ball','Genie Lamp','Trapped Heart'];
+  const giftIco='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8"/><path d="M12 8v13"/><path d="M12 8S10.5 3 8 3a2.5 2.5 0 0 0 0 5z"/><path d="M12 8s1.5-5 4-5a2.5 2.5 0 0 1 0 5z"/></svg>';
+  const arr='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+  const sec=document.getElementById('non-upgraded-section');
+  if(!sec)return;
+  sec.innerHTML=popular.map(g=>{
+    const safe=g.replace(/'/g,"\\'");
+    return `<div class="acard" onclick="sendNonUpgraded('${safe}')">
+      <div class="aico">${giftIco}</div>
+      <div class="atxt"><div class="at">${g}</div><div class="ad">Найти владельцев неулучшенных</div></div>
+      <div class="arr">${arr}</div>
+    </div>`;
+  }).join('');
+})();
+function sendNonUpgraded(gift){
+  if(tg)tg.HapticFeedback?.impactOccurred('medium');
+  deepLink('nonupgraded__'+toApiName(gift));
+}
+
+// === COMBO SEARCH ===
+const COMBO_MAX=6;
+let comboGifts=[];
+let comboCountry='all';
+
+function renderComboGifts(filter){
+  const el=document.getElementById('combo-gift-list');
+  if(!el)return;
+  const f=(filter||'').toLowerCase();
+  const filtered=GIFTS.map((g,i)=>({name:g,i})).filter(x=>!f||x.name.toLowerCase().includes(f));
+  el.innerHTML=filtered.map(x=>`
+    <div class="crow${comboGifts.includes(x.name)?' sel':''}" onclick="toggleComboGift('${x.name.replace(/'/g,"\\'")}')">
+      <div class="cname">${x.name}</div>
+      <div class="cnum">#${x.i+1}</div>
+      <div class="ccheck">${CHECK_SVG}</div>
+    </div>`).join('');
+  if(!filtered.length) el.innerHTML='<div class="empty-msg">Ничего не найдено</div>';
+  updateComboLabel();
+}
+
+function updateComboLabel(){
+  const el=document.getElementById('combo-sel-label');
+  if(!el)return;
+  if(comboGifts.length){el.textContent='Выбрано '+comboGifts.length+': '+comboGifts.join(', ');el.classList.remove('empty');}
+  else{el.textContent='Ничего не выбрано';el.classList.add('empty');}
+}
+
+function toggleComboGift(name){
+  const idx=comboGifts.indexOf(name);
+  if(idx>=0){comboGifts.splice(idx,1);}
+  else{
+    if(comboGifts.length>=COMBO_MAX){showToast('Максимум '+COMBO_MAX+' коллекций');if(tg)tg.HapticFeedback?.notificationOccurred('warning');return;}
+    comboGifts.push(name);
+  }
+  renderComboGifts(document.getElementById('combo-gift-search').value);
+  if(tg)tg.HapticFeedback?.impactOccurred('light');
+}
+
+function setComboCountry(btn){
+  document.querySelectorAll('.combo-cf').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  comboCountry=btn.dataset.country;
+  if(tg)tg.HapticFeedback?.selectionChanged();
+}
+
+function resetCombo(){
+  comboGifts=[];comboCountry='all';
+  ['combo-girls','combo-orig','combo-market'].forEach(id=>{const c=document.getElementById(id);if(c)c.checked=false;});
+  document.querySelectorAll('.combo-cf').forEach(b=>b.classList.toggle('active',b.dataset.country==='all'));
+  const s=document.getElementById('combo-gift-search');if(s)s.value='';
+  renderComboGifts('');
+}
+
+function runCombo(){
+  if(!comboGifts.length){showToast('Выберите хотя бы одну коллекцию');if(tg)tg.HapticFeedback?.notificationOccurred('warning');return;}
+  let flags='';
+  if(document.getElementById('combo-girls').checked)flags+='g';
+  if(document.getElementById('combo-orig').checked)flags+='o';
+  if(document.getElementById('combo-market').checked)flags+='m';
+  if(!flags)flags='0';
+  const cc=comboCountry==='all'?'xx':comboCountry;
+  const giftStr=comboGifts.map(toApiName).join('-');
+  const param='combo__'+cc+'_'+flags+'__'+giftStr;
+  if(param.length>64){showToast('Слишком много коллекций — уберите пару');if(tg)tg.HapticFeedback?.notificationOccurred('warning');return;}
+  if(tg)tg.HapticFeedback?.impactOccurred('heavy');
+  deepLink(param);
+}
+
+const _comboSearchInp=document.getElementById('combo-gift-search');
+if(_comboSearchInp)_comboSearchInp.addEventListener('input',e=>renderComboGifts(e.target.value));
+
+// === SUBSCRIPTION ===
+// API_BASE — публичный URL HTTP-API бота. Можно передать через ?api=... при
+// запуске мини-аппа, либо задать window.NFT_API_BASE. Если пусто — работаем
+// через бота (кнопки открывают бота для оплаты и статуса).
+const API_BASE=((new URLSearchParams(location.search).get('api'))||window.NFT_API_BASE||'').replace(/\/+$/,'');
+const SUB_PRICE_TON=0.5;
+let _buyMode='deeplink';
+
+function _$(id){return document.getElementById(id)}
+
+function _renderFallback(){
+  const card=_$('sub-card');card.classList.remove('active');
+  _$('sub-badge-text').textContent='Доступ к боту';
+  _$('sub-meta').textContent='';
+  _$('sub-limit').style.display='none';
+  _$('sub-hint').textContent='Статус и оплата подписки — в боте.';
+  _$('sub-buy').style.display='';_$('sub-buy-text').textContent='Купить подписку · '+SUB_PRICE_TON+' TON';
+  _$('sub-status').style.display='';
+  _buyMode='deeplink';
+}
+
+function _renderStatus(s){
+  const card=_$('sub-card');
+  if(s.unlimited){
+    card.classList.add('active');
+    _$('sub-badge-text').textContent=s.is_admin?'Администратор':'Подписка активна';
+    _$('sub-meta').textContent='∞ безлимит';
+    _$('sub-limit').style.display='none';
+    _$('sub-hint').textContent='Доступ без ограничений.';
+    _$('sub-buy').style.display='none';
+    _$('sub-status').style.display='none';
+  }else{
+    card.classList.remove('active');
+    _$('sub-badge-text').textContent='Без подписки';
+    _$('sub-meta').textContent='Лимитов: '+s.remaining+'/'+s.limit;
+    _$('sub-limit').style.display='';
+    const pct=Math.max(0,Math.min(100,Math.round((s.used/s.limit)*100)));
+    _$('sub-bar').style.width=pct+'%';
+    _$('sub-hint').textContent='Осталось '+s.remaining+' запросов сегодня. Лимит сбрасывается в 00:00 UTC.';
+    _$('sub-buy').style.display='';_$('sub-buy-text').textContent='Купить подписку · '+SUB_PRICE_TON+' TON';
+    _$('sub-status').style.display='none';
+    _buyMode='api';
+  }
+}
+
+async function loadStatus(){
+  if(!API_BASE||!tg||!tg.initData){_renderFallback();return;}
+  try{
+    const r=await fetch(API_BASE+'/api/status?initData='+encodeURIComponent(tg.initData));
+    if(!r.ok)throw 0;
+    _renderStatus(await r.json());
+  }catch(e){_renderFallback();}
+}
+
+async function buySub(){
+  if(tg)tg.HapticFeedback?.impactOccurred('medium');
+  if(_buyMode!=='api'||!API_BASE||!tg||!tg.initData){deepLink('buy');return;}
+  showToast('Создаём счёт…');
+  try{
+    const r=await fetch(API_BASE+'/api/invoice',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({initData:tg.initData})});
+    const d=await r.json();
+    if(d.pay_url){
+      try{tg.openTelegramLink(d.pay_url)}catch(e){window.open(d.pay_url,'_blank')}
+      showToast('После оплаты доступ выдастся автоматически');
+      setTimeout(loadStatus,6000);
+    }else{deepLink('buy');}
+  }catch(e){deepLink('buy');}
+}
+
+function openStatusBot(){if(tg)tg.HapticFeedback?.impactOccurred('light');deepLink('status');}
+
+loadStatus();
+
+let tt;
+function showToast(t){
+  const el=document.getElementById('toast');
+  el.textContent=t;el.classList.add('show');
+  clearTimeout(tt);tt=setTimeout(()=>el.classList.remove('show'),2200);
+}
+</script>
+</body>
+</html>

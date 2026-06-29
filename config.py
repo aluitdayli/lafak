@@ -1,0 +1,69 @@
+"""
+Конфигурация NFT Scanner V8.
+"""
+import os
+
+# ── Telegram ──────────────────────────────────
+BOT_TOKEN = os.getenv("BOT_TOKEN", "ВАШ_ТОКЕН_БОТА")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "ВАШ_USERNAME_БОТА")
+ADMIN_IDS = [8203437780, 8332982896]
+TELEGRAM_API_SERVER = os.getenv("TELEGRAM_API_SERVER", "")
+
+# ── Mini App ──────────────────────────────────
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://ваш-сайт.github.io/")
+
+# ── Обязательная подписка на канал (ОТКЛЮЧЕНА) ─
+# Проверка подписки на канал удалена — бот работает без неё.
+# Константы оставлены для обратной совместимости импортов.
+REQUIRED_CHANNEL_ID = -1003941762925
+REQUIRED_CHANNEL_LINK = "https://t.me/+P3jnazfq-nw5ZDQy"
+
+# ── Платная подписка (доступ к боту) ──────────
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "lumpanut")      # без @
+FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "5"))         # запросов/день без подписки
+SUBSCRIPTION_PRICE_TON = float(os.getenv("SUBSCRIPTION_PRICE_TON", "0.5"))
+TON_WALLET = os.getenv("TON_WALLET", "UQD-0F79RLLQRXuDU7DpNN1ndlK62iaPxdI4-7oF-odOsTLU")
+
+# CryptoBot (Crypto Pay API)
+CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "602302:AADZKT29XccvGmdmlDaNXrG0JUXNQWB5nCB")
+CRYPTOBOT_API = os.getenv("CRYPTOBOT_API", "https://pay.crypt.bot/api")
+CRYPTOBOT_ASSET = os.getenv("CRYPTOBOT_ASSET", "TON")
+
+# Встроенный HTTP-API для мини-аппа (статус подписки / создание счёта)
+WEBAPI_HOST = os.getenv("WEBAPI_HOST", "0.0.0.0")
+WEBAPI_PORT = int(os.getenv("WEBAPI_PORT", "8080"))
+WEBAPI_ENABLED = os.getenv("WEBAPI_ENABLED", "1") == "1"
+
+# ── БД ────────────────────────────────────────
+DB_PATH = os.getenv("DB_PATH", "/data/nft_cache.db")
+
+# ── Скан ──────────────────────────────────────
+MAX_CONCURRENT_REQUESTS = 150
+REQUEST_TIMEOUT = 5
+DELAY_BETWEEN_BATCHES = 0
+PROGRESS_UPDATE_INTERVAL = 2  # секунд
+
+# ── Рандомный парсинг ─────────────────────────
+RANDOM_COLLECTIONS_COUNT = 5
+RANDOM_ITEMS_PER_COLLECTION = 100
+
+# ── Пагинация ────────────────────────────────
+GIFTS_PER_PAGE = 8
+MODELS_PER_PAGE = 10
+BACKDROPS_PER_PAGE = 10
+RESULTS_PER_PAGE = 10        # юзеров на страницу (компактно, влезает в TG)
+TOTAL_RESULTS = 200          # макс. результатов за скан
+
+# ── Фильтры NFT ──────────────────────────────
+#  код: (min, max, label)
+NFT_COUNT_RANGES = {
+    "1-3":  (1, 3,   "1–3 NFT"),
+    "4-10": (4, 10,  "4–10 NFT"),
+    "10+":  (10, 999999, "10+ NFT"),
+    "any":  (0, 999999, "Любое кол-во"),
+}
+DEFAULT_NFT_RANGE = "any"
+MAX_NFT_HARD_CAP = 999999
+
+# ── Экспорт ──────────────────────────────────
+CSV_DIR = os.getenv("CSV_DIR", "/data/exports")
