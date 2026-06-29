@@ -31,7 +31,8 @@ CRYPTOBOT_ASSET = os.getenv("CRYPTOBOT_ASSET", "TON")
 
 # Встроенный HTTP-API для мини-аппа (статус подписки / создание счёта)
 WEBAPI_HOST = os.getenv("WEBAPI_HOST", "0.0.0.0")
-WEBAPI_PORT = int(os.getenv("WEBAPI_PORT", "8080"))
+# Amvera направляет домен на порт 80 (или из env PORT). Для локали можно WEBAPI_PORT.
+WEBAPI_PORT = int(os.getenv("PORT", os.getenv("WEBAPI_PORT", "80")))
 WEBAPI_ENABLED = os.getenv("WEBAPI_ENABLED", "1") == "1"
 
 # ── БД ────────────────────────────────────────

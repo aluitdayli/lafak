@@ -1064,7 +1064,7 @@ if(_comboSearchInp)_comboSearchInp.addEventListener('input',e=>renderComboGifts(
 // API_BASE — публичный URL HTTP-API бота. Можно передать через ?api=... при
 // запуске мини-аппа, либо задать window.NFT_API_BASE. Если пусто — работаем
 // через бота (кнопки открывают бота для оплаты и статуса).
-const API_BASE=((new URLSearchParams(location.search).get('api'))||window.NFT_API_BASE||'').replace(/\/+$/,'');
+const API_BASE=((new URLSearchParams(location.search).get('api'))||window.NFT_API_BASE||'https://chinese-pars-turbo-svinya.amvera.io').replace(/\/+$/,'');
 const SUB_PRICE_TON=0.5;
 let _buyMode='deeplink';
 
