@@ -12,11 +12,15 @@ TELEGRAM_API_SERVER = os.getenv("TELEGRAM_API_SERVER", "")
 # ── Mini App ──────────────────────────────────
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://ваш-сайт.github.io/")
 
-# ── Обязательная подписка на канал (ОТКЛЮЧЕНА) ─
-# Проверка подписки на канал удалена — бот работает без неё.
-# Константы оставлены для обратной совместимости импортов.
-REQUIRED_CHANNEL_ID = -1003941762925
-REQUIRED_CHANNEL_LINK = "https://t.me/+P3jnazfq-nw5ZDQy"
+# ── Обязательная подписка на канал ────────────
+# Бот требует подписку на этот канал для доступа.
+# ВАЖНО: бот должен быть АДМИНИСТРАТОРОМ канала, иначе проверка не сработает
+# (get_chat_member вернёт ошибку → бот пропускает юзеров, fail-open).
+# Чтобы ОТКЛЮЧИТЬ проверку — задай REQUIRED_CHANNEL_ID=0 в окружении.
+REQUIRED_CHANNEL_ID = int(os.getenv("REQUIRED_CHANNEL_ID", "-1003941762925"))
+REQUIRED_CHANNEL_LINK = os.getenv(
+    "REQUIRED_CHANNEL_LINK", "https://t.me/+P3jnazfq-nw5ZDQy"
+)
 
 # ── Платная подписка (доступ к боту) ──────────
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "lumpanut")      # без @

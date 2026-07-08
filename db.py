@@ -612,6 +612,77 @@ async def get_all_users_with_token() -> list[tuple[int, str]]:
     return [(row["chat_id"], row["bot_token"] or "") async for row in cur]
 
 
+# ── Бэкап / восстановление важных данных ─────
+# Выгружаем ТОЛЬКО ценное (юзеры, подписки, зеркала, избранное, шаблоны,
+# просмотренные) — без тяжёлого кэша NFT (он до-сканируется сам). Так бэкап
+# маленький и легко переносится между аккаунтами/деплоями через Telegram.
+
+_BACKUP_TABLES = [
+    "subscriptions",
+    "bot_users",
+    "mirrors",
+    "favorites",
+    "user_templates",
+    "viewed_users",
+]
+
+
+async def export_state() -> dict:
+    """Собирает важные таблицы в dict (для выгрузки в JSON)."""
+    db = await _get_db()
+    out: dict = {"version": 1, "tables": {}}
+    for table in _BACKUP_TABLES:
+        try:
+            cur = await db.execute(f"SELECT * FROM {table}")
+            rows = [dict(r) async for r in cur]
+            out["tables"][table] = rows
+        except Exception:
+            out["tables"][table] = []
+    return out
+
+
+async def import_state(data: dict) -> dict:
+    """Заливает данные из dict обратно в БД (слияние, без удаления текущих).
+
+    Подписки/шаблоны — REPLACE (свежие данные важнее), остальное — IGNORE
+    (не плодим дубликаты). Возвращает счётчик добавленного по таблицам.
+    """
+    db = await _get_db()
+    tables = (data or {}).get("tables", {})
+    counts: dict[str, int] = {}
+
+    # Как вставлять каждую таблицу: (SQL-режим, колонки)
+    plans = {
+        "subscriptions": ("REPLACE", ["user_id", "is_subscribed", "subscription_end",
+                                       "daily_usage", "last_reset_date", "created_at"]),
+        "bot_users": ("IGNORE", ["chat_id", "bot_token", "started_at"]),
+        "mirrors": ("IGNORE", ["owner_id", "bot_token", "bot_username", "created_at"]),
+        "favorites": ("IGNORE", ["chat_id", "display_name", "username",
+                                  "collection", "slug", "note", "added_at"]),
+        "user_templates": ("REPLACE", ["chat_id", "country", "text"]),
+        "viewed_users": ("IGNORE", ["chat_id", "owner_key", "viewed_at"]),
+    }
+
+    for table, (mode, cols) in plans.items():
+        rows = tables.get(table) or []
+        if not rows:
+            counts[table] = 0
+            continue
+        placeholders = ", ".join("?" for _ in cols)
+        col_sql = ", ".join(cols)
+        sql = f"INSERT OR {mode} INTO {table} ({col_sql}) VALUES ({placeholders})"
+        payload = []
+        for r in rows:
+            payload.append(tuple(r.get(c) for c in cols))
+        try:
+            await db.executemany(sql, payload)
+            counts[table] = len(payload)
+        except Exception:
+            counts[table] = 0
+    await db.commit()
+    return counts
+
+
 # ── Статистика ───────────────────────────────
 
 async def get_cache_stats() -> dict:

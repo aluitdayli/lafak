@@ -13,6 +13,11 @@ env/
 /data/
 exports/
 
+# …но файл-сид для переезда базы коммитить МОЖНО (см. _seed_raw_db_if_present)
+!seed_nft_cache.db
+!seed_nft_cache.db-wal
+!seed_nft_cache.db-shm
+
 # Логи и временное
 *.log
 .DS_Store

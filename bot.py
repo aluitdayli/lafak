@@ -174,9 +174,51 @@ def _st(cid: int) -> dict:
 #  Подписка на канал
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# Кэш статуса подписки: user_id → время (monotonic), до которого считаем
+# юзера подписанным. Чтобы не дёргать get_chat_member на каждое действие.
+_sub_cache: dict[int, float] = {}
+_SUB_CACHE_TTL = 300  # сек
+
+
 async def _check_sub(user_id: int, cur_bot: Bot | None = None) -> bool:
-    """Проверка обязательной подписки на канал ОТКЛЮЧЕНА — бот работает без неё."""
-    return True
+    """Обязательная подписка на канал.
+
+    True — если юзер подписан (или админ / канал не настроен). False — если
+    точно не подписан. Если проверить не удалось (бот не админ канала, канал
+    недоступен) — НЕ блокируем (fail-open), чтобы мисконфиг не положил бота.
+    """
+    if user_id in ADMIN_IDS:
+        return True
+    if not REQUIRED_CHANNEL_ID:
+        return True
+
+    now = time.monotonic()
+    exp = _sub_cache.get(user_id)
+    if exp and exp > now:
+        return True
+
+    b = cur_bot or bot
+    try:
+        member = await b.get_chat_member(REQUIRED_CHANNEL_ID, user_id)
+        status = getattr(member, "status", None)
+        ok = str(status) in (
+            "member", "administrator", "creator",
+            "ChatMemberStatus.MEMBER", "ChatMemberStatus.ADMINISTRATOR",
+            "ChatMemberStatus.CREATOR",
+        )
+    except Exception as e:
+        logger.warning(
+            "check_sub: не смог проверить подписку user=%s (%s). "
+            "Проверь, что бот — АДМИН канала %s. Пропускаю юзера.",
+            user_id, e, REQUIRED_CHANNEL_ID,
+        )
+        return True
+
+    if ok:
+        _sub_cache[user_id] = now + _SUB_CACHE_TTL
+    else:
+        _sub_cache.pop(user_id, None)
+    return ok
 
 
 # ── Платная подписка / дневные лимиты ─────────
@@ -1162,6 +1204,7 @@ async def cb_adm_back(cq: CallbackQuery):
 
 @router.callback_query(F.data == "sub_check")
 async def cb_sub_check(cq: CallbackQuery):
+    _sub_cache.pop(cq.from_user.id, None)  # форсим свежую проверку
     if not await _check_sub(cq.from_user.id, cq.bot):
         await cq.answer("❌ Вы ещё не подписались!", show_alert=True)
         return
@@ -2693,6 +2736,95 @@ async def _do_broadcast(message: Message):
         f"📢 <b>Готово!</b>  ✅ {sent}  ❌ {failed}  📊 {total}",
         parse_mode=ParseMode.HTML,
     )
+
+
+@router.message(Command("dbexport"))
+async def cmd_dbexport(message: Message):
+    """Выгрузка важных данных (юзеры/подписки/зеркала/избранное/шаблоны) в JSON.
+    Использовать на СТАРОМ аккаунте, чтобы забрать базу перед переездом."""
+    if not _is_admin(message.from_user.id):
+        return
+    try:
+        data = await db.export_state()
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        tbl = data.get("tables", {})
+        n_users = len(tbl.get("bot_users", []))
+        n_subs = sum(1 for r in tbl.get("subscriptions", []) if r.get("is_subscribed"))
+        n_mir = len(tbl.get("mirrors", []))
+        await message.answer_document(
+            BufferedInputFile(payload, filename="backup.json"),
+            caption=(
+                "📦 <b>Бэкап базы</b>\n"
+                f"👥 юзеров: {n_users}\n"
+                f"💎 активных подписок: {n_subs}\n"
+                f"🪞 зеркал: {n_mir}\n\n"
+                "Чтобы восстановить на другом аккаунте — пришли этот файл боту "
+                "с командой <code>/dbimport</code> в подписи."
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        logger.error("dbexport error: %s", e, exc_info=True)
+        await message.answer(f"❌ Ошибка экспорта: {html.escape(str(e))}")
+
+
+@router.message(Command("dbimport"))
+async def cmd_dbimport(message: Message):
+    """Восстановление базы из JSON-бэкапа. Если команда в подписи к файлу —
+    файл обработается сразу (handle_document); иначе ждём файл следующим сообщением."""
+    if not _is_admin(message.from_user.id):
+        return
+    if message.document:
+        return  # файл с подписью /dbimport обработает handle_document
+    _st(message.chat.id)["search_action"] = "db_import"
+    await message.answer(
+        "♻️ Пришли файл бэкапа (<code>backup.json</code>) следующим сообщением.\n\n"
+        "<i>/cancel — отмена</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(F.document)
+async def handle_document(message: Message):
+    """Приём файла бэкапа от админа → восстановление базы (слияние)."""
+    if not _is_admin(message.from_user.id):
+        return
+    st = _st(message.chat.id)
+    cap = (message.caption or "").strip().lower()
+    if "/dbimport" not in cap and st.get("search_action") != "db_import":
+        return
+    st.pop("search_action", None)
+
+    status = await message.answer("♻️ Восстанавливаю базу…")
+    try:
+        bio = await bot.download(message.document)
+        data = json.loads(bio.read().decode("utf-8"))
+        counts = await db.import_state(data)
+        stats = await db.get_global_stats()
+
+        # Активируем импортированные зеркала (те, что ещё не подняты).
+        activated = 0
+        for m in await db.get_all_mirrors():
+            if m["bot_token"] not in mirror_bots:
+                try:
+                    if await _activate_mirror(m["bot_token"]):
+                        activated += 1
+                except Exception:
+                    pass
+
+        await status.edit_text(
+            "✅ <b>База восстановлена</b>\n"
+            f"👥 юзеров всего: {stats['bot_users']}\n"
+            f"➕ добавлено: юзеров {counts.get('bot_users', 0)}, "
+            f"подписок {counts.get('subscriptions', 0)}, "
+            f"зеркал {counts.get('mirrors', 0)} (запущено {activated}), "
+            f"избранного {counts.get('favorites', 0)}, "
+            f"шаблонов {counts.get('user_templates', 0)}",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        logger.error("dbimport error: %s", e, exc_info=True)
+        await status.edit_text(f"❌ Ошибка импорта: {html.escape(str(e))}")
 
 
 @router.message(F.photo)
@@ -4958,10 +5090,81 @@ async def _start_mirrors():
             logger.warning("Зеркало %s не запустилось: %s", m.get("bot_username"), e)
 
 
+async def _maybe_seed_from_backup():
+    """Авто-восстановление из файла бэкапа, лежащего РЯДОМ с кодом (в репозитории).
+
+    Нужно, когда веб-загрузка файлов в /data не работает: кладёшь backup.json
+    в git-репозиторий, деплоишь — и данные (юзеры/подписки/зеркала) сами
+    заливаются в ПУСТУЮ базу при старте. Срабатывает один раз: если база уже
+    не пустая — пропускаем, чтобы не затирать актуальные данные.
+    Ищем файлы seed_backup.json / backup.json в папке с bot.py.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = None
+    for name in ("seed_backup.json", "backup.json"):
+        p = os.path.join(here, name)
+        if os.path.exists(p):
+            path = p
+            break
+    if not path:
+        return
+    try:
+        stats = await db.get_global_stats()
+        if (stats.get("bot_users") or 0) > 5:
+            logger.info("Seed: база уже не пустая (%s юзеров) — пропуск сида",
+                        stats.get("bot_users"))
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        counts = await db.import_state(data)
+        logger.info("Seed: восстановлено из %s: %s", os.path.basename(path), counts)
+    except Exception as e:
+        logger.error("Seed error: %s", e, exc_info=True)
+
+
+def _seed_raw_db_if_present():
+    """Копирует ГОТОВЫЙ файл базы из репозитория в /data ДО открытия БД.
+
+    Нужно, когда веб-загрузка файлов в /data не работает: кладёшь свой
+    вытащенный nft_cache.db в репозиторий под именем `seed_nft_cache.db`
+    (можно с -wal/-shm рядом), деплоишь — и он становится базой на новом
+    аккаунте. Срабатывает один раз (по маркеру), уже наполненную базу не трогает.
+    """
+    from config import DB_PATH
+    import shutil
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = os.path.join(here, "seed_nft_cache.db")
+    if not os.path.exists(src):
+        return
+    marker = DB_PATH + ".seeded"
+    if os.path.exists(marker):
+        return
+    try:
+        os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+        # Не затираем уже наполненную базу (>200 КБ ≈ есть данные).
+        if os.path.exists(DB_PATH) and os.path.getsize(DB_PATH) > 200_000:
+            open(marker, "w").close()
+            logger.info("Seed(raw): база уже наполнена — пропуск, ставлю маркер")
+            return
+        for suffix in ("", "-wal", "-shm"):
+            s = src + suffix
+            if os.path.exists(s):
+                shutil.copyfile(s, DB_PATH + suffix)
+        open(marker, "w").close()
+        logger.info("Seed(raw): база восстановлена из seed_nft_cache.db")
+    except Exception as e:
+        logger.error("Seed(raw) error: %s", e, exc_info=True)
+
+
 async def main():
     logger.info("Инициализация БД…")
+    # Сырой сид (готовый .db) — ДО открытия соединения.
+    _seed_raw_db_if_present()
     await db.init_db()
     os.makedirs(CSV_DIR, exist_ok=True)
+
+    # Одноразовое авто-восстановление из JSON-бэкапа в репозитории (если база пустая).
+    await _maybe_seed_from_backup()
 
     # HTTP-API для мини-аппа (статус подписки / счета)
     if WEBAPI_ENABLED:
