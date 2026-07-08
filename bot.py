@@ -2769,8 +2769,16 @@ async def _do_broadcast(message: Message):
     )
     sent = 0
     failed = 0
+    fail_reasons: dict[str, int] = {}  # причина → счётчик (для диагностики охвата)
+
+    def _note_fail(exc: Exception):
+        # Короткий ключ причины: "chat not found", "bot was blocked", ...
+        key = str(exc)[:60]
+        fail_reasons[key] = fail_reasons.get(key, 0) + 1
+
     for i, (b, cid) in enumerate(pairs, 1):
         ok = False
+        last_exc: Exception | None = None
         try:
             await _send(b, cid)
             ok = True
@@ -2780,18 +2788,22 @@ async def _do_broadcast(message: Message):
             try:
                 await _send(b, cid)
                 ok = True
-            except Exception:
-                pass
-        except Exception:
+            except Exception as e2:
+                last_exc = e2
+        except Exception as e:
+            last_exc = e
             # Последняя попытка через ОСНОВНОЙ бот (вдруг юзер и там жал /start).
             if b is not bot:
                 try:
                     await _send(bot, cid)
                     ok = True
-                except Exception:
-                    pass
+                    last_exc = None
+                except Exception as e2:
+                    last_exc = e2
         sent += 1 if ok else 0
         failed += 0 if ok else 1
+        if not ok and last_exc is not None:
+            _note_fail(last_exc)
         if i % 25 == 0:
             try:
                 await status.edit_text(
@@ -2801,10 +2813,19 @@ async def _do_broadcast(message: Message):
                 pass
         await asyncio.sleep(0.03)
 
+    # Разбивка причин отказов — топ-5 (для диагностики охвата).
+    top = sorted(fail_reasons.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    if fail_reasons:
+        logger.info("Broadcast fail reasons: %s", dict(top))
+    reasons_txt = ""
+    if top:
+        reasons_txt = "\n\n<b>Причины отказов:</b>\n" + "\n".join(
+            f"• {html.escape(k)} — {v}" for k, v in top
+        )
     tail = f"\n⚠️ Недоступно ~{dead_mirror} (зеркало мертво)" if dead_mirror else ""
     await status.edit_text(
         f"📢 <b>Готово!</b>  ✅ {sent}  ❌ {failed}  📊 {total}\n"
-        f"🪞 Зеркал активно: {live_mirrors}{tail}",
+        f"🪞 Зеркал активно: {live_mirrors}{tail}{reasons_txt}",
         parse_mode=ParseMode.HTML,
     )
 
