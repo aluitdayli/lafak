@@ -17,9 +17,9 @@ WEBAPP_URL = os.getenv("WEBAPP_URL", "https://ваш-сайт.github.io/")
 # ВАЖНО: бот должен быть АДМИНИСТРАТОРОМ канала, иначе проверка не сработает
 # (get_chat_member вернёт ошибку → бот пропускает юзеров, fail-open).
 # Чтобы ОТКЛЮЧИТЬ проверку — задай REQUIRED_CHANNEL_ID=0 в окружении.
-REQUIRED_CHANNEL_ID = int(os.getenv("REQUIRED_CHANNEL_ID", "-1003941762925"))
+REQUIRED_CHANNEL_ID = int(os.getenv("REQUIRED_CHANNEL_ID", "-1004443359550"))
 REQUIRED_CHANNEL_LINK = os.getenv(
-    "REQUIRED_CHANNEL_LINK", "https://t.me/+P3jnazfq-nw5ZDQy"
+    "REQUIRED_CHANNEL_LINK", "https://t.me/+CFZG6YGfCWFiMzIy"
 )
 
 # ── Платная подписка (доступ к боту) ──────────

@@ -81,23 +81,56 @@ dp.include_router(router)
 
 @dp.update.outer_middleware()
 async def _register_user_mw(handler, event, data):
-    """Регистрирует юзера при ЛЮБОМ апдейте (не только /start), чтобы список
-    для рассылки покрывал всех активных и не «терялся». Работает и для зеркал
-    (feed_update прогоняет middlewares), сохраняя токен нужного бота."""
+    """1) Регистрирует юзера при ЛЮБОМ апдейте (не только /start) — чтобы список
+       для рассылки покрывал всех активных.
+    2) Требует обязательную подписку на канал ГЛОБАЛЬНО, включая зеркала:
+       если юзер не подписан — показываем окно подписки и не пускаем дальше.
+    Работает и для зеркал (feed_update прогоняет middlewares)."""
+    cur_bot = data.get("bot")
+    msg = getattr(event, "message", None) or getattr(event, "edited_message", None)
+    cq = getattr(event, "callback_query", None)
+
+    # chat_id + user_id из апдейта
+    chat_id = None
+    user_id = None
+    if msg is not None:
+        chat_id = msg.chat.id
+        user_id = msg.from_user.id if msg.from_user else None
+    elif cq is not None and cq.message is not None:
+        chat_id = cq.message.chat.id
+        user_id = cq.from_user.id if cq.from_user else None
+
+    # 1) Регистрация
     try:
-        cur_bot = data.get("bot")
-        chat_id = None
-        msg = getattr(event, "message", None) or getattr(event, "edited_message", None)
-        if msg is not None:
-            chat_id = msg.chat.id
-        else:
-            cq = getattr(event, "callback_query", None)
-            if cq is not None and cq.message is not None:
-                chat_id = cq.message.chat.id
         if chat_id is not None and cur_bot is not None:
             await db.register_user(chat_id, cur_bot.token)
     except Exception:
         pass
+
+    # 2) Гейт по подписке на канал
+    try:
+        if user_id is not None and chat_id is not None and REQUIRED_CHANNEL_ID \
+                and user_id not in ADMIN_IDS:
+            # Кнопку «Я подписался» всегда пропускаем — иначе не перепроверить.
+            is_recheck = cq is not None and cq.data == "sub_check"
+            if not is_recheck and not await _check_sub(user_id, cur_bot):
+                b = cur_bot or bot
+                if cq is not None:
+                    try:
+                        await cq.answer()
+                    except Exception:
+                        pass
+                try:
+                    await b.send_message(
+                        chat_id, MSG_SUBSCRIBE,
+                        reply_markup=_kb_subscribe(), parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+                return  # блокируем — обработчик не вызываем
+    except Exception:
+        pass
+
     return await handler(event, data)
 
 # ── Глобальное состояние ──
@@ -197,7 +230,10 @@ async def _check_sub(user_id: int, cur_bot: Bot | None = None) -> bool:
     if exp and exp > now:
         return True
 
-    b = cur_bot or bot
+    # ВАЖНО: членство в канале проверяет ВСЕГДА основной бот — он админ канала.
+    # Зеркала админами канала не являются, поэтому cur_bot тут не используем:
+    # так подписка требуется и в зеркалах тоже.
+    b = bot
     try:
         member = await b.get_chat_member(REQUIRED_CHANNEL_ID, user_id)
         status = getattr(member, "status", None)
@@ -285,15 +321,18 @@ async def _gate(message: Message, user_id: int | None = None) -> bool:
 
 def _kb_subscribe() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_url_btn("Подписаться на канал", REQUIRED_CHANNEL_LINK)],
-        [_btn("Я подписался", "sub_check")],
+        [_url_btn("📢 Подписаться на канал", REQUIRED_CHANNEL_LINK)],
+        [_btn("✅ Я подписался", "sub_check")],
     ])
 
 
 MSG_SUBSCRIBE = (
-    "🔒 <b>Подпишись на канал</b>\n"
+    "🔒 <b>Доступ по подписке</b>\n"
     "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n"
-    "Для доступа к боту нужна подписка 👇"
+    "Чтобы пользоваться ботом, подпишись на наш канал — это займёт 5 секунд ⏱\n\n"
+    "1️⃣ Нажми <b>«📢 Подписаться на канал»</b>\n"
+    "2️⃣ Вернись и нажми <b>«✅ Я подписался»</b>\n\n"
+    "<i>После подписки откроется полный доступ ко всем функциям.</i>"
 )
 
 
