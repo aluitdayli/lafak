@@ -43,7 +43,7 @@ def main():
     con.close()
     with open("seed_backup.json", "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False)
-    print("→ seed_backup.json готов. Положи его в репозиторий и задеплой.")
+    print("-> seed_backup.json готов. Положи его в репозиторий и задеплой.")
 
 
 if __name__ == "__main__":

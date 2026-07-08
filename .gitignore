@@ -18,6 +18,10 @@ exports/
 !seed_nft_cache.db-wal
 !seed_nft_cache.db-shm
 
+# Папка с выгруженной со старого сервера базой (700 МБ+) — НЕ коммитить!
+амвера/
+amvera-data/
+
 # Логи и временное
 *.log
 .DS_Store
