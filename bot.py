@@ -2848,6 +2848,58 @@ async def _do_broadcast(message: Message):
     )
 
 
+@router.message(Command("mirrorstat"))
+async def cmd_mirrorstat(message: Message):
+    """Состояние зеркал: живые/мёртвые и сколько юзеров на каждом.
+    Помогает понять охват рассылки — юзеры мёртвых зеркал недостижимы."""
+    if not _is_admin(message.from_user.id):
+        return
+    status = await message.answer("🪞 Проверяю зеркала…")
+    mirrors = await db.get_all_mirrors()
+    # Пробуем поднять ещё не активные (дохлые быстро отвалятся).
+    not_live = [m for m in mirrors if m["bot_token"] not in mirror_bots]
+    if not_live:
+        await asyncio.gather(
+            *[_activate_mirror(m["bot_token"]) for m in not_live],
+            return_exceptions=True,
+        )
+
+    # Считаем юзеров по токену.
+    cnt: dict[str, int] = {}
+    for _cid, tok in await db.get_all_users_with_token():
+        cnt[tok] = cnt.get(tok, 0) + 1
+
+    main_users = cnt.get(bot.token, 0)
+    rows = []
+    alive = dead = dead_users = 0
+    for m in mirrors:
+        tok = m["bot_token"]
+        n = cnt.get(tok, 0)
+        live = tok in mirror_bots
+        if live:
+            alive += 1
+        else:
+            dead += 1
+            dead_users += n
+        rows.append((live, n, m.get("bot_username") or "?"))
+
+    # Мёртвые с наибольшим числом юзеров — сверху (их важнее всего чинить).
+    rows.sort(key=lambda r: (r[0], -r[1]))
+
+    lines = [
+        f"🪞 <b>Зеркала:</b> 🟢 {alive} живых · 🔴 {dead} мёртвых",
+        f"👤 На основном боте: <b>{main_users}</b>",
+        f"💀 На мёртвых зеркалах: <b>{dead_users}</b> — недостижимы, пока "
+        f"владельцы не обновят токен (@BotFather → /token)\n",
+    ]
+    for live, n, uname in rows[:40]:
+        lines.append(f"{'🟢' if live else '🔴'} @{uname} — {n} юз.")
+    if len(rows) > 40:
+        lines.append(f"\n<i>…и ещё {len(rows) - 40}</i>")
+
+    await status.edit_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 @router.message(Command("subtest"))
 async def cmd_subtest(message: Message):
     """Диагностика обязательной подписки: видит ли бот канал и админ ли он.
