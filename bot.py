@@ -2769,6 +2769,7 @@ async def _do_broadcast(message: Message):
     )
     sent = 0
     failed = 0
+    done = 0
     fail_reasons: dict[str, int] = {}  # причина → счётчик (для диагностики охвата)
 
     def _note_fail(exc: Exception):
@@ -2776,42 +2777,59 @@ async def _do_broadcast(message: Message):
         key = str(exc)[:60]
         fail_reasons[key] = fail_reasons.get(key, 0) + 1
 
-    for i, (b, cid) in enumerate(pairs, 1):
-        ok = False
-        last_exc: Exception | None = None
-        try:
-            await _send(b, cid)
-            ok = True
-        except TelegramRetryAfter as e:
-            # Флуд-контроль Telegram: ждём и повторяем один раз.
-            await asyncio.sleep(e.retry_after + 1)
+    async def _send_retry(b: Bot, cid: int) -> tuple[bool, Exception | None]:
+        """Отправка с несколькими повторами на флуд-контроль (429),
+        чтобы юзеры не терялись из-за лимитов, а не реальных ошибок."""
+        for _ in range(5):
             try:
                 await _send(b, cid)
-                ok = True
-            except Exception as e2:
-                last_exc = e2
-        except Exception as e:
-            last_exc = e
-            # Последняя попытка через ОСНОВНОЙ бот (вдруг юзер и там жал /start).
-            if b is not bot:
-                try:
-                    await _send(bot, cid)
-                    ok = True
-                    last_exc = None
-                except Exception as e2:
-                    last_exc = e2
-        sent += 1 if ok else 0
-        failed += 0 if ok else 1
-        if not ok and last_exc is not None:
-            _note_fail(last_exc)
-        if i % 25 == 0:
-            try:
-                await status.edit_text(
-                    f"📢 {i}/{total}  ✅ {sent}  ❌ {failed}\n🪞 Зеркал активно: {live_mirrors}"
-                )
-            except Exception:
-                pass
-        await asyncio.sleep(0.03)
+                return True, None
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(e.retry_after + 0.5)
+            except Exception as e:
+                return False, e
+        return False, None
+
+    # Параллельная отправка: до 20 сообщений одновременно — кратно быстрее,
+    # чем по одному. Реальный потолок задаёт сам Telegram (~30/сек на бота),
+    # флуд-контроль обрабатывается ретраями внутри _send_retry.
+    sem = asyncio.Semaphore(20)
+
+    async def _worker(b: Bot, cid: int):
+        nonlocal sent, failed, done
+        async with sem:
+            ok, exc = await _send_retry(b, cid)
+            # Фолбэк через основной бот (вдруг юзер и там жал /start).
+            if not ok and b is not bot:
+                ok2, exc2 = await _send_retry(bot, cid)
+                if ok2:
+                    ok, exc = True, None
+                else:
+                    exc = exc2 or exc
+        done += 1
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+            if exc is not None:
+                _note_fail(exc)
+
+    tasks = [asyncio.create_task(_worker(b, cid)) for b, cid in pairs]
+
+    # Прогресс раз в ~2 сек, пока идёт рассылка.
+    while True:
+        finished = all(t.done() for t in tasks)
+        try:
+            await status.edit_text(
+                f"📢 {done}/{total}  ✅ {sent}  ❌ {failed}\n🪞 Зеркал активно: {live_mirrors}"
+            )
+        except Exception:
+            pass
+        if finished:
+            break
+        await asyncio.sleep(2)
+
+    await asyncio.gather(*tasks, return_exceptions=True)
 
     # Разбивка причин отказов — топ-5 (для диагностики охвата).
     top = sorted(fail_reasons.items(), key=lambda kv: kv[1], reverse=True)[:5]
@@ -2828,6 +2846,50 @@ async def _do_broadcast(message: Message):
         f"🪞 Зеркал активно: {live_mirrors}{tail}{reasons_txt}",
         parse_mode=ParseMode.HTML,
     )
+
+
+@router.message(Command("subtest"))
+async def cmd_subtest(message: Message):
+    """Диагностика обязательной подписки: видит ли бот канал и админ ли он.
+    Помогает понять, почему подписка не требуется."""
+    if not _is_admin(message.from_user.id):
+        return
+    lines = ["🔎 <b>Проверка канала подписки</b>",
+             f"ID: <code>{REQUIRED_CHANNEL_ID}</code>"]
+    if not REQUIRED_CHANNEL_ID:
+        lines.append("\n⚠️ Проверка ОТКЛЮЧЕНА (REQUIRED_CHANNEL_ID=0).")
+        await message.answer("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
+    # 1) Видит ли бот канал (проверяет ID + что бот в канале).
+    try:
+        chat = await bot.get_chat(REQUIRED_CHANNEL_ID)
+        lines.append(f"✅ Канал виден: <b>{html.escape(chat.title or '')}</b>")
+    except Exception as e:
+        lines.append(f"❌ Бот НЕ видит канал: <code>{html.escape(str(e))}</code>")
+        lines.append("→ Проверь ID и <b>добавь бота в канал</b>.")
+        await message.answer("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
+
+    # 2) Админ ли бот (нужно, чтобы проверять чужие подписки).
+    try:
+        me = await bot.get_me()
+        m = await bot.get_chat_member(REQUIRED_CHANNEL_ID, me.id)
+        st = str(m.status)
+        is_adm = any(x in st for x in ("administrator", "creator", "ADMINISTRATOR", "CREATOR"))
+        lines.append(f"🤖 Статус бота: <b>{st}</b>")
+        if is_adm:
+            lines.append("✅ Бот админ — проверка подписки РАБОТАЕТ.")
+        else:
+            lines.append("❌ Бот НЕ админ → проверка не работает (пропускает всех).\n"
+                         "→ Сделай бота <b>администратором</b> канала.")
+    except Exception as e:
+        lines.append(f"❌ get_chat_member упал: <code>{html.escape(str(e))}</code>\n"
+                     "→ Бот должен быть <b>админом</b> канала.")
+
+    lines.append("\n<i>Важно: админам бота (ADMIN_IDS) подписка не требуется — "
+                 "проверяй с обычного аккаунта.</i>")
+    await message.answer("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 @router.message(Command("dbexport"))
