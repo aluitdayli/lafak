@@ -3499,9 +3499,9 @@ async def _do_peek_country_scan(message: Message, gift: str, country: str):
                     break
                 page += 1
 
-                # Параллельный запрос 12 страниц одновременно (быстрее)
+                # Параллельный запрос 20 страниц одновременно (быстрее)
                 page_tasks = []
-                for p_off in range(12):
+                for p_off in range(20):
                     cur_p = page + p_off
                     if cur_p > max_pages:
                         break
@@ -4000,8 +4000,12 @@ async def _do_peek_cooldown_scan(message: Message, gift: str, cd_status: str, co
     active_scans[cid] = stop_ev
 
     try:
+        # Кулдаун активен/скоро снимется только у НЕДАВНО минтнутых/переданных
+        # предметов. В обычном порядке (старые) их нет вообще — все «free».
+        # Сканируем новейшие (number desc): там есть active/soon/free.
         all_items = await peek_api.search_all_pages(
             gift, max_pages=3000, stop_event=stop_ev,
+            sort_by="number", sort_order="desc",
         )
 
         # Фильтр по стране
@@ -4084,8 +4088,12 @@ async def _do_peek_original_scan(message: Message, gift: str):
     active_scans[cid] = stop_ev
 
     try:
+        # Оригинальные владельцы = свежеминтнутые предметы (никогда не
+        # передавались). Их больше всего среди НОВЕЙШИХ (number desc) — там
+        # ~98% оригиналов, а не ~36% как при обычном порядке.
         all_items = await peek_api.search_all_pages(
             gift, max_pages=3000, stop_event=stop_ev,
+            sort_by="number", sort_order="desc",
         )
 
         original = peek_api.filter_original_owners(all_items)
