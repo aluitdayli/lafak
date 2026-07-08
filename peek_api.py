@@ -17,19 +17,24 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://server.peek.tg/api/nft"
 HEADERS = {
     "Referer": "https://peek.tg/",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json",
+    "Origin": "https://peek.tg",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 
 COOLDOWN_DAYS = 7  # дней кулдауна после улучшения / передачи
 
 # Сетевые настройки (надёжность + скорость)
-_MAX_RETRIES = 3            # повторов на временные ошибки (429/5xx/timeout)
+_MAX_RETRIES = 3            # повторов на временные ошибки (403/429/5xx/timeout)
 _RETRY_BASE_DELAY = 0.4     # базовая задержка backoff, сек
-_DEFAULT_CONCURRENCY = 6    # страниц одновременно в search_all_pages
+_DEFAULT_CONCURRENCY = 12   # страниц одновременно в search_all_pages (было 6 → быстрее)
 
 
-def make_connector(limit: int = 24) -> "aiohttp.TCPConnector":
+def make_connector(limit: int = 48) -> "aiohttp.TCPConnector":
     """Тюнингованный коннектор: keep-alive + DNS-кэш → меньше TLS/handshake."""
     return aiohttp.TCPConnector(
         limit=limit,
@@ -39,7 +44,7 @@ def make_connector(limit: int = 24) -> "aiohttp.TCPConnector":
     )
 
 
-def make_session(limit: int = 24) -> "aiohttp.ClientSession":
+def make_session(limit: int = 48) -> "aiohttp.ClientSession":
     """Готовая сессия peek.tg с правильными заголовками и пулом соединений."""
     return aiohttp.ClientSession(headers=HEADERS, connector=make_connector(limit))
 
@@ -200,8 +205,9 @@ async def search_gifts(
                             if u:
                                 item["username"] = _strip_tme(u)
                         return items
-                    # 429 / 5xx — временная ошибка, повторяем с backoff
-                    if resp.status == 429 or resp.status >= 500:
+                    # 403 / 429 / 5xx — возможно временная (Cloudflare/лимит),
+                    # повторяем с backoff.
+                    if resp.status in (403, 429) or resp.status >= 500:
                         last_err = f"HTTP {resp.status}"
                         delay = _RETRY_BASE_DELAY * (2 ** attempt)
                         # уважаем Retry-After, если сервер прислал
@@ -210,7 +216,7 @@ async def search_gifts(
                             delay = max(delay, min(float(ra), 5.0))
                         await asyncio.sleep(delay)
                         continue
-                    # 4xx (кроме 429) — не временная, нет смысла повторять
+                    # прочие 4xx — не временная, нет смысла повторять
                     logger.error("peek.tg search error: %d for %s", resp.status, name)
                     return []
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:

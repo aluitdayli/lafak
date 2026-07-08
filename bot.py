@@ -2722,7 +2722,19 @@ async def _do_broadcast(message: Message):
         await message.answer("❌ Пустое сообщение — нечего рассылать.")
         return
 
-    # token → Bot (основной + активные зеркала)
+    # ── Поднимаем ЖИВЫЕ зеркала, которые ещё не активны ──
+    # Юзера зеркала может достать ТОЛЬКО его бот. Если зеркало не поднято —
+    # его юзеры не получат рассылку. Дохлые токены быстро отвалятся (таймаут 8с).
+    status = await message.answer("📢 Готовлю рассылку: поднимаю зеркала…")
+    db_mirrors = await db.get_all_mirrors()
+    not_live = [m for m in db_mirrors if m["bot_token"] not in mirror_bots]
+    if not_live:
+        await asyncio.gather(
+            *[_activate_mirror(m["bot_token"]) for m in not_live],
+            return_exceptions=True,
+        )
+
+    # token → Bot (основной + ВСЕ поднятые зеркала)
     bots_by_token: dict[str, Bot] = {bot.token: bot}
     bots_by_token.update(mirror_bots)
 
@@ -2735,44 +2747,64 @@ async def _do_broadcast(message: Message):
     all_ids = await db.get_all_chat_ids()
 
     pairs: list[tuple[Bot, int]] = []
+    dead_mirror = 0  # юзеры мёртвых зеркал (недостижимы своим ботом)
     for cid in all_ids:
         tok = token_by_cid.get(cid, "")
-        b = bots_by_token.get(tok) or bot  # фолбэк на основной бот
+        b = bots_by_token.get(tok)
+        if b is None:
+            # зеркало юзера не поднялось → пробуем основной бот как фолбэк
+            if tok:
+                dead_mirror += 1
+            b = bot
         pairs.append((b, cid))
 
     if not pairs:
-        await message.answer("📢 Нет юзеров.")
+        await status.edit_text("📢 Нет юзеров.")
         return
 
     total = len(pairs)
-    status = await message.answer(f"📢 Рассылка: 0/{total}…")
+    live_mirrors = len(mirror_bots)
+    await status.edit_text(
+        f"📢 Рассылка: 0/{total}…\n🪞 Зеркал активно: {live_mirrors}"
+    )
     sent = 0
     failed = 0
     for i, (b, cid) in enumerate(pairs, 1):
+        ok = False
         try:
             await _send(b, cid)
-            sent += 1
+            ok = True
         except TelegramRetryAfter as e:
             # Флуд-контроль Telegram: ждём и повторяем один раз.
             await asyncio.sleep(e.retry_after + 1)
             try:
                 await _send(b, cid)
-                sent += 1
+                ok = True
             except Exception:
-                failed += 1
+                pass
         except Exception:
-            failed += 1
-        if i % 20 == 0:
+            # Последняя попытка через ОСНОВНОЙ бот (вдруг юзер и там жал /start).
+            if b is not bot:
+                try:
+                    await _send(bot, cid)
+                    ok = True
+                except Exception:
+                    pass
+        sent += 1 if ok else 0
+        failed += 0 if ok else 1
+        if i % 25 == 0:
             try:
                 await status.edit_text(
-                    f"📢 {i}/{total}  ✅ {sent}  ❌ {failed}",
+                    f"📢 {i}/{total}  ✅ {sent}  ❌ {failed}\n🪞 Зеркал активно: {live_mirrors}"
                 )
             except Exception:
                 pass
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.03)
 
+    tail = f"\n⚠️ Недоступно ~{dead_mirror} (зеркало мертво)" if dead_mirror else ""
     await status.edit_text(
-        f"📢 <b>Готово!</b>  ✅ {sent}  ❌ {failed}  📊 {total}",
+        f"📢 <b>Готово!</b>  ✅ {sent}  ❌ {failed}  📊 {total}\n"
+        f"🪞 Зеркал активно: {live_mirrors}{tail}",
         parse_mode=ParseMode.HTML,
     )
 
@@ -3332,9 +3364,9 @@ async def _do_peek_country_scan(message: Message, gift: str, country: str):
                     break
                 page += 1
 
-                # Параллельный запрос 6 страниц одновременно
+                # Параллельный запрос 12 страниц одновременно (быстрее)
                 page_tasks = []
-                for p_off in range(6):
+                for p_off in range(12):
                     cur_p = page + p_off
                     if cur_p > max_pages:
                         break
@@ -3376,7 +3408,7 @@ async def _do_peek_country_scan(message: Message, gift: str, country: str):
                     break
                 if len(found) >= TOTAL_RESULTS * 3:
                     break
-                await asyncio.sleep(0.05)  # быстрее между батчами
+                await asyncio.sleep(0.02)  # быстрее между батчами
 
         # ── AI-уточнение национальности (нейросеть nationalize.io) ──
         # Словарь/скрипт ловит явные случаи; нейросеть добирает латинские/
@@ -5041,21 +5073,29 @@ async def _mirror_polling_loop(m_bot: Bot, token: str):
 
 
 async def _activate_mirror(token: str) -> Bot | None:
-    """Создаёт Bot-объект и запускает polling для зеркала."""
+    """Создаёт Bot-объект и запускает polling для зеркала.
+    Быстрый таймаут на get_me — чтобы дохлые токены (Unauthorized/timeout)
+    не висели по минуте. При ошибке аккуратно закрываем сессию (без утечек)."""
+    new_bot = None
     try:
         if TELEGRAM_API_SERVER:
             _s = AiohttpSession(api=TelegramAPIServer.from_base(TELEGRAM_API_SERVER))
             new_bot = Bot(token=token, session=_s)
         else:
             new_bot = Bot(token=token)
-        info = await new_bot.get_me()
+        info = await asyncio.wait_for(new_bot.get_me(), timeout=8)
         logger.info("Зеркало активировано: @%s", info.username)
         mirror_bots[token] = new_bot
         task = asyncio.create_task(_mirror_polling_loop(new_bot, token))
         mirror_tasks[token] = task
         return new_bot
     except Exception as e:
-        logger.error("Ошибка активации зеркала: %s", e)
+        logger.warning("Зеркало не запустилось (%s…): %s", token[:12], e)
+        if new_bot is not None:
+            try:
+                await new_bot.session.close()
+            except Exception:
+                pass
         return None
 
 
@@ -5119,14 +5159,21 @@ async def cb_adm_mirror_del(cq: CallbackQuery):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def _start_mirrors():
-    """Запуск всех зеркал из БД."""
+    """Запуск всех зеркал из БД — ПАРАЛЛЕЛЬНО и с таймаутом.
+    Мёртвые токены (Unauthorized/timeout) больше не тормозят запуск: все
+    зеркала поднимаются одновременно, дохлые быстро отваливаются."""
     mirrors = await db.get_all_mirrors()
-    for m in mirrors:
-        token = m["bot_token"]
+    if not mirrors:
+        return
+
+    async def _one(m):
         try:
-            await _activate_mirror(token)
+            await _activate_mirror(m["bot_token"])
         except Exception as e:
             logger.warning("Зеркало %s не запустилось: %s", m.get("bot_username"), e)
+
+    await asyncio.gather(*[_one(m) for m in mirrors], return_exceptions=True)
+    logger.info("Зеркала: активно %d из %d", len(mirror_bots), len(mirrors))
 
 
 async def _maybe_seed_from_backup():
@@ -5213,8 +5260,9 @@ async def main():
         except Exception as e:
             logger.error("WebAPI не запущен: %s", e)
 
-    # Запуск зеркал
-    await _start_mirrors()
+    # Запуск зеркал — В ФОНЕ, чтобы дохлые токены зеркал НЕ блокировали
+    # старт основного бота (раньше бот висел на активации 70 зеркал).
+    asyncio.create_task(_start_mirrors())
 
     max_retries = 5
     for attempt in range(1, max_retries + 1):
