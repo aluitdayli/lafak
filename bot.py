@@ -22,6 +22,7 @@ from typing import Optional
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message, CallbackQuery,
@@ -53,7 +54,6 @@ import peek_api
 import gender_api
 import nationality_api
 import subscription
-import cryptobot
 from chinese_detector import (
     is_chinese_name, is_russian_name, is_bot_or_shop,
     COUNTRY_DETECTORS, COUNTRY_FLAGS, COUNTRY_LABELS,
@@ -77,6 +77,28 @@ else:
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
+
+
+@dp.update.outer_middleware()
+async def _register_user_mw(handler, event, data):
+    """Регистрирует юзера при ЛЮБОМ апдейте (не только /start), чтобы список
+    для рассылки покрывал всех активных и не «терялся». Работает и для зеркал
+    (feed_update прогоняет middlewares), сохраняя токен нужного бота."""
+    try:
+        cur_bot = data.get("bot")
+        chat_id = None
+        msg = getattr(event, "message", None) or getattr(event, "edited_message", None)
+        if msg is not None:
+            chat_id = msg.chat.id
+        else:
+            cq = getattr(event, "callback_query", None)
+            if cq is not None and cq.message is not None:
+                chat_id = cq.message.chat.id
+        if chat_id is not None and cur_bot is not None:
+            await db.register_user(chat_id, cur_bot.token)
+    except Exception:
+        pass
+    return await handler(event, data)
 
 # ── Глобальное состояние ──
 active_scans: dict[int, asyncio.Event] = {}
@@ -161,7 +183,6 @@ async def _check_sub(user_id: int, cur_bot: Bot | None = None) -> bool:
 
 def kb_buy() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("💎 Оплатить криптой (CryptoBot)", "buy_crypto")],
         [_url_btn("💬 Оплатить через поддержку", f"https://t.me/{SUPPORT_USERNAME}")],
         [_btn("Мой статус", "my_status"), _btn("В Меню", "home", icon=E_MENU)],
     ])
@@ -174,9 +195,7 @@ def msg_buy() -> str:
         f"Без подписки доступно <b>{FREE_DAILY_LIMIT} запросов в день</b>. "
         "С подпиской — <b>безлимит навсегда</b>.\n\n"
         f"<b>Цена: {SUBSCRIPTION_PRICE_TON} TON</b>\n\n"
-        "<blockquote>Способ 1 — CryptoBot: нажми кнопку ниже, оплати счёт, "
-        "доступ выдастся автоматически.</blockquote>\n"
-        "<blockquote>Способ 2 — TON вручную: переведи "
+        "<blockquote>Переведи "
         f"{SUBSCRIPTION_PRICE_TON} TON на кошелёк\n<code>{TON_WALLET}</code>\n"
         f"и напиши в поддержку @{SUPPORT_USERNAME} — выдадим доступ.</blockquote>\n\n"
         "<i>Подписка действует навсегда и не сбрасывается.</i>"
@@ -901,78 +920,6 @@ async def cb_my_status(cq: CallbackQuery):
     await cq.answer()
 
 
-@router.callback_query(F.data == "buy_crypto")
-async def cb_buy_crypto(cq: CallbackQuery):
-    uid = cq.from_user.id
-    if await subscription.can_use(uid) and (await subscription.status(uid))["unlimited"]:
-        await cq.answer("У вас уже есть безлимитный доступ ✅", show_alert=True)
-        return
-    await cq.answer("Создаю счёт…")
-    inv = await cryptobot.create_invoice(uid)
-    if not inv:
-        await cq.message.answer(
-            "❌ Не удалось создать счёт. Попробуй позже или оплати через поддержку "
-            f"@{SUPPORT_USERNAME}.", parse_mode=ParseMode.HTML,
-        )
-        return
-    await db.cb_invoice_add(inv["invoice_id"], uid)
-    await cq.message.answer(
-        f"<b>Счёт на {SUBSCRIPTION_PRICE_TON} TON создан</b>\n\n"
-        "Оплати по кнопке ниже. После оплаты доступ выдастся <b>автоматически</b> "
-        "в течение минуты.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [_url_btn("💎 Оплатить счёт", inv["pay_url"])],
-            [_btn("Я оплатил — проверить", f"cb_check:{inv['invoice_id']}")],
-        ]),
-        parse_mode=ParseMode.HTML,
-    )
-
-
-@router.callback_query(F.data.startswith("cb_check:"))
-async def cb_check_invoice(cq: CallbackQuery):
-    inv_id = int(cq.data.split(":", 1)[1])
-    data = await cryptobot.get_invoice(inv_id)
-    if data and data.get("status") == "paid":
-        await subscription.grant(cq.from_user.id)
-        await db.cb_invoice_mark(inv_id, "paid")
-        await cq.message.answer(
-            "✅ <b>Оплата получена!</b>\n\nПодписка активирована — теперь безлимит ♾️",
-            parse_mode=ParseMode.HTML, reply_markup=kb_home(),
-        )
-        await cq.answer("Оплачено ✅", show_alert=True)
-    else:
-        await cq.answer("Оплата ещё не поступила. Попробуй через минуту.", show_alert=True)
-
-
-async def _cryptobot_poller():
-    """Фоновая задача: проверяет неоплаченные счета и выдаёт подписку."""
-    while True:
-        try:
-            pending = await db.cb_invoices_pending()
-            for inv in pending:
-                data = await cryptobot.get_invoice(inv["invoice_id"])
-                if not data:
-                    continue
-                status = data.get("status")
-                if status == "paid":
-                    uid = inv["user_id"]
-                    await subscription.grant(uid)
-                    await db.cb_invoice_mark(inv["invoice_id"], "paid")
-                    try:
-                        await bot.send_message(
-                            uid,
-                            "✅ <b>Оплата получена!</b>\n\nПодписка активирована — безлимит ♾️",
-                            parse_mode=ParseMode.HTML,
-                        )
-                    except Exception:
-                        pass
-                elif status == "expired":
-                    await db.cb_invoice_mark(inv["invoice_id"], "expired")
-        except Exception as e:
-            logger.debug("cryptobot poller error: %s", e)
-        await asyncio.sleep(20)
-
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  Админ-панель
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1113,8 +1060,11 @@ async def cb_adm_broadcast(cq: CallbackQuery):
 
     await cq.message.edit_text(
         "📢 <b>Рассылка</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n\n"
-        "Введи текст (HTML).\n"
-        "Отправится <b>всем</b> юзерам <b>всех</b> ботов.\n\n"
+        "Пришли сообщение — оно уйдёт <b>всем</b> юзерам <b>всех</b> ботов "
+        "<b>как есть</b>, с полным форматированием.\n\n"
+        "Можно: <b>жирный</b>, <i>курсив</i>, ссылки, ॐ премиум TGP-эмодзи — "
+        "просто набери/вставь их прямо в Telegram.\n"
+        "Можно приложить <b>фото</b> — подпись тоже с форматированием.\n\n"
         "<i>/cancel — отмена</i>",
         parse_mode=ParseMode.HTML,
     )
@@ -1793,7 +1743,7 @@ async def _do_peek_combo_scan(message: Message, gifts: list[str], country: str =
             async with sem:
                 if stop_ev.is_set():
                     return []
-                return await peek_api.search_all_pages(gift, max_pages=200, stop_event=stop_ev)
+                return await peek_api.search_all_pages(gift, max_pages=400, stop_event=stop_ev)
 
         tasks = [asyncio.create_task(_load(g)) for g in gifts]
         done_n = 0
@@ -2146,7 +2096,7 @@ async def _do_non_upgraded_scan(message: Message, gift_name: str):
         )
 
         peek_results = await peek_api.search_all_pages(
-            gift_name, max_pages=200, stop_event=stop_ev,
+            gift_name, max_pages=400, stop_event=stop_ev,
         )
 
         # Собираем ВСЕХ уникальных юзеров: текущие + previousOwner
@@ -2640,19 +2590,73 @@ async def cmd_cancel(message: Message):
     await message.answer("❌ Отменено.", reply_markup=kb_home())
 
 
-async def _do_broadcast(message: Message, text: str):
-    """Рассылка сообщения всем юзерам всех ботов (основной + зеркала)."""
-    all_bots_map: dict[str, Bot] = {bot.token: bot}
-    all_bots_map.update(mirror_bots)
+async def _do_broadcast(message: Message):
+    """Рассылка сообщения админа ВСЕМ юзерам всех ботов (основной + зеркала).
+
+    Сообщение отправляется «как есть» с полным форматированием: жирный/курсив,
+    премиум TGP-эмодзи и т.д. (через message.html_text — он сохраняет все entity,
+    включая custom_emoji). Если админ приложил фото — оно тоже рассылается,
+    подпись берётся из caption с форматированием.
+
+    Охватываем каждого, кто хоть раз взаимодействовал: bot_users ∪ viewed_users.
+    Каждому шлём через ТОТ бот, где он зарегистрирован (основной/зеркало);
+    если этот бот сейчас не поднят — фолбэк на основной.
+    """
+    # HTML с сохранением форматирования и премиум-эмодзи (text ИЛИ caption).
+    text = message.html_text or ""
+
+    # Фото (если приложено): скачиваем байты один раз через основной бот.
+    # file_id нельзя переиспользовать между разными ботами, поэтому храним
+    # его отдельно на каждый бот (первая отправка грузит файл, дальше — по id).
+    photo_data: bytes | None = None
+    if message.photo:
+        try:
+            bio = await bot.download(message.photo[-1])
+            photo_data = bio.read()
+        except Exception as e:
+            logger.error("Broadcast: не удалось скачать фото: %s", e)
+            await message.answer("❌ Не удалось загрузить фото для рассылки.")
+            return
+    caption_fits = len(text) <= 1024  # лимит подписи к фото в Telegram
+    fid_cache: dict[str, str] = {}     # token → file_id этого бота
+
+    async def _send(b: Bot, cid: int):
+        if photo_data is not None:
+            media = fid_cache.get(b.token) or BufferedInputFile(photo_data, "broadcast.jpg")
+            if caption_fits:
+                sent_msg = await b.send_photo(
+                    cid, media, caption=text or None, parse_mode=ParseMode.HTML,
+                )
+            else:
+                # Подпись длиннее лимита — фото отдельно, текст следом.
+                sent_msg = await b.send_photo(cid, media)
+                await b.send_message(cid, text, parse_mode=ParseMode.HTML)
+            if b.token not in fid_cache and sent_msg.photo:
+                fid_cache[b.token] = sent_msg.photo[-1].file_id
+        else:
+            await b.send_message(cid, text, parse_mode=ParseMode.HTML)
+
+    if not text and photo_data is None:
+        await message.answer("❌ Пустое сообщение — нечего рассылать.")
+        return
+
+    # token → Bot (основной + активные зеркала)
+    bots_by_token: dict[str, Bot] = {bot.token: bot}
+    bots_by_token.update(mirror_bots)
+
+    # chat_id → токен бота, где юзер зарегистрирован
+    token_by_cid: dict[int, str] = {}
+    for cid, tok in await db.get_all_users_with_token():
+        token_by_cid.setdefault(cid, tok)
+
+    # Полный список получателей: bot_users ∪ viewed_users
+    all_ids = await db.get_all_chat_ids()
 
     pairs: list[tuple[Bot, int]] = []
-    seen_cids: set[int] = set()
-    for token, b in all_bots_map.items():
-        cids = await db.get_all_chat_ids_by_token(token)
-        for cid in cids:
-            if cid not in seen_cids:
-                pairs.append((b, cid))
-                seen_cids.add(cid)
+    for cid in all_ids:
+        tok = token_by_cid.get(cid, "")
+        b = bots_by_token.get(tok) or bot  # фолбэк на основной бот
+        pairs.append((b, cid))
 
     if not pairs:
         await message.answer("📢 Нет юзеров.")
@@ -2662,16 +2666,24 @@ async def _do_broadcast(message: Message, text: str):
     status = await message.answer(f"📢 Рассылка: 0/{total}…")
     sent = 0
     failed = 0
-    for b, cid in pairs:
+    for i, (b, cid) in enumerate(pairs, 1):
         try:
-            await b.send_message(cid, text, parse_mode=ParseMode.HTML)
+            await _send(b, cid)
             sent += 1
+        except TelegramRetryAfter as e:
+            # Флуд-контроль Telegram: ждём и повторяем один раз.
+            await asyncio.sleep(e.retry_after + 1)
+            try:
+                await _send(b, cid)
+                sent += 1
+            except Exception:
+                failed += 1
         except Exception:
             failed += 1
-        if (sent + failed) % 10 == 0:
+        if i % 20 == 0:
             try:
                 await status.edit_text(
-                    f"📢 {sent + failed}/{total}  ✅ {sent}  ❌ {failed}",
+                    f"📢 {i}/{total}  ✅ {sent}  ❌ {failed}",
                 )
             except Exception:
                 pass
@@ -2681,6 +2693,19 @@ async def _do_broadcast(message: Message, text: str):
         f"📢 <b>Готово!</b>  ✅ {sent}  ❌ {failed}  📊 {total}",
         parse_mode=ParseMode.HTML,
     )
+
+
+@router.message(F.photo)
+async def handle_broadcast_photo(message: Message):
+    """Фото от админа в режиме рассылки → рассылаем фото с форматированной подписью.
+    Вне режима рассылки фото игнорируется (другой обработки фото нет)."""
+    st = _st(message.chat.id)
+    if st.get("search_action") != "admin_broadcast":
+        return
+    if not _is_admin(message.from_user.id):
+        return
+    st.pop("search_action", None)
+    await _do_broadcast(message)
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -2695,7 +2720,7 @@ async def handle_text(message: Message):
         if not _is_admin(message.from_user.id):
             await message.answer("⛔ Нет доступа.")
             return
-        await _do_broadcast(message, q)
+        await _do_broadcast(message)
         return
 
     # Админ: выдать/снять подписку
@@ -3324,7 +3349,7 @@ async def _do_peek_girls_scan(message: Message, gift: str, country: str | None =
     try:
         # Загружаем все NFT коллекции
         all_items = await peek_api.search_all_pages(
-            gift, max_pages=200, stop_event=stop_ev,
+            gift, max_pages=400, stop_event=stop_ev,
         )
 
         # Фильтр по стране (до гендера — так быстрее)
@@ -3455,7 +3480,7 @@ async def _do_peek_market_scan(message: Message, gift: str):
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, market_only=True, max_pages=200, stop_event=stop_ev,
+            gift, market_only=True, max_pages=400, stop_event=stop_ev,
         )
 
         # Фильтруем — только внутренний маркет TG (за звёзды)
@@ -3536,7 +3561,7 @@ async def _do_peek_market_country_scan(message: Message, gift: str, country: str
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, market_only=True, max_pages=200, stop_event=stop_ev,
+            gift, market_only=True, max_pages=400, stop_event=stop_ev,
         )
 
         # Фильтруем: маркет TG + страна
@@ -3638,7 +3663,7 @@ async def _do_peek_cooldown_scan(message: Message, gift: str, cd_status: str, co
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, max_pages=200, stop_event=stop_ev,
+            gift, max_pages=400, stop_event=stop_ev,
         )
 
         # Фильтр по стране
@@ -3722,7 +3747,7 @@ async def _do_peek_original_scan(message: Message, gift: str):
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, max_pages=200, stop_event=stop_ev,
+            gift, max_pages=400, stop_event=stop_ev,
         )
 
         original = peek_api.filter_original_owners(all_items)
@@ -4945,9 +4970,6 @@ async def main():
             await webapi.start_webapi()
         except Exception as e:
             logger.error("WebAPI не запущен: %s", e)
-
-    # Фоновая проверка оплат CryptoBot
-    asyncio.create_task(_cryptobot_poller())
 
     # Запуск зеркал
     await _start_mirrors()

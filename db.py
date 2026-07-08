@@ -604,6 +604,14 @@ async def get_all_chat_ids_global() -> list[int]:
     return [row["chat_id"] async for row in cur]
 
 
+async def get_all_users_with_token() -> list[tuple[int, str]]:
+    """Пары (chat_id, bot_token) — через какой бот юзер зарегистрирован.
+    Нужно для рассылки: каждому юзеру шлём через его бот (основной/зеркало)."""
+    db = await _get_db()
+    cur = await db.execute("SELECT chat_id, bot_token FROM bot_users")
+    return [(row["chat_id"], row["bot_token"] or "") async for row in cur]
+
+
 # ── Статистика ───────────────────────────────
 
 async def get_cache_stats() -> dict:

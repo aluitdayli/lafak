@@ -1,9 +1,8 @@
 """
-Лёгкий HTTP-API для мини-аппа (статус подписки + создание счёта CryptoBot).
+Лёгкий HTTP-API для мини-аппа (статус подписки).
 
 Эндпоинты (CORS открыт):
   GET  /api/status   ?initData=<tg webapp initData>  → статус подписки/лимитов
-  POST /api/invoice   {initData}                      → создаёт CryptoBot счёт
 
 Безопасность: initData проверяется HMAC-подписью по BOT_TOKEN
 (алгоритм Telegram WebApp). Подделать user_id нельзя.
@@ -17,7 +16,6 @@ from aiohttp import web
 
 from config import BOT_TOKEN, WEBAPI_HOST, WEBAPI_PORT, TON_WALLET, SUBSCRIPTION_PRICE_TON, SUPPORT_USERNAME
 import subscription
-import cryptobot
 import db
 
 logger = logging.getLogger(__name__)
@@ -78,30 +76,9 @@ async def handle_status(request):
     return _cors(web.json_response(st))
 
 
-async def handle_invoice(request):
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    init_data = body.get("initData", "")
-    pairs = _verify_init_data(init_data)
-    if not pairs:
-        return _cors(web.json_response({"error": "bad_init_data"}, status=401))
-    uid = _user_id(pairs)
-    if not uid:
-        return _cors(web.json_response({"error": "no_user"}, status=400))
-
-    inv = await cryptobot.create_invoice(uid)
-    if not inv:
-        return _cors(web.json_response({"error": "invoice_failed"}, status=502))
-    await db.cb_invoice_add(inv["invoice_id"], uid)
-    return _cors(web.json_response({"pay_url": inv["pay_url"], "invoice_id": inv["invoice_id"]}))
-
-
 def build_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/api/status", handle_status)
-    app.router.add_post("/api/invoice", handle_invoice)
     app.router.add_route("OPTIONS", "/api/{tail:.*}", _options)
     app.router.add_get("/", lambda r: web.json_response({"ok": True, "service": "nft-parser-api"}))
     return app

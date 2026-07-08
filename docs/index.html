@@ -1114,20 +1114,10 @@ async function loadStatus(){
   }catch(e){_renderFallback();}
 }
 
-async function buySub(){
+function buySub(){
   if(tg)tg.HapticFeedback?.impactOccurred('medium');
-  if(_buyMode!=='api'||!API_BASE||!tg||!tg.initData){deepLink('buy');return;}
-  showToast('Создаём счёт…');
-  try{
-    const r=await fetch(API_BASE+'/api/invoice',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({initData:tg.initData})});
-    const d=await r.json();
-    if(d.pay_url){
-      try{tg.openTelegramLink(d.pay_url)}catch(e){window.open(d.pay_url,'_blank')}
-      showToast('После оплаты доступ выдастся автоматически');
-      setTimeout(loadStatus,6000);
-    }else{deepLink('buy');}
-  }catch(e){deepLink('buy');}
+  // Оплата через бота: TON-кошелёк вручную + поддержка.
+  deepLink('buy');
 }
 
 function openStatusBot(){if(tg)tg.HapticFeedback?.impactOccurred('light');deepLink('status');}

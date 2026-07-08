@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Локальные данные / БД (лежат на постоянном диске /data, не в репо)
+*.db
+*.db-wal
+*.db-shm
+/data/
+exports/
+
+# Логи и временное
+*.log
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

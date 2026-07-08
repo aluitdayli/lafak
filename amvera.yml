@@ -1,0 +1,20 @@
+# Amvera Cloud — конфигурация деплоя бота (NFT Scanner).
+#
+# ГЛАВНОЕ: постоянный диск монтируется в /data (persistenceMount).
+# Там лежит SQLite-база (config.DB_PATH = /data/nft_cache.db) и экспорт
+# (/data/exports). Благодаря этому юзеры, подписки, зеркала и просмотренные
+# НЕ сбрасываются при передеплое — база остаётся между деплоями.
+#
+# Секреты (BOT_TOKEN, BOT_USERNAME, WEBAPP_URL, SUPPORT_USERNAME, TON_WALLET
+# и пр.) задаются в разделе «Переменные окружения» в панели Amvera, НЕ здесь.
+# DB_PATH менять не нужно — по умолчанию /data/nft_cache.db (на постоянном диске).
+
+meta:
+  environment: python
+  toolchain:
+    name: pip
+    version: 3.12
+run:
+  scriptName: bot.py
+  persistenceMount: /data
+  containerPort: 80

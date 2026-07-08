@@ -6,6 +6,7 @@ Base URL: https://server.peek.tg/api/nft
 """
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -230,22 +231,30 @@ async def search_gifts(
 async def search_all_pages(
     name: str,
     market_only: bool = False,
-    max_pages: int = 200,
+    max_pages: int = 400,
     stop_event: asyncio.Event | None = None,
     progress_callback=None,
     concurrent: int = _DEFAULT_CONCURRENCY,
+    time_budget: float | None = 90.0,
 ) -> list[dict]:
     """
     Загружает все страницы результатов для коллекции.
     Параллельно по `concurrent` страниц одновременно (с retry внутри search_gifts).
-    Останавливается, только когда встречает неполную/пустую страницу В КОНЦЕ
-    батча — так временный сбой в середине не обрезает выдачу преждевременно.
+
+    Надёжная остановка: прекращаем ТОЛЬКО когда ВЕСЬ батч пуст (реальный конец
+    коллекции). Единичная пустая/сбойная (или короткая) страница в середине НЕ
+    обрезает выдачу — раньше временный сбой peek.tg «съедал» большую часть
+    результатов, из-за чего режимы комбо/девушки/маркет/кулдаун/оригинал
+    находили очень мало. `time_budget` не даёт зависнуть на огромных коллекциях.
     """
     all_items = []
+    start = time.monotonic()
     async with make_session() as session:
         page = 1
         while page <= max_pages:
             if stop_event and stop_event.is_set():
+                break
+            if time_budget is not None and time.monotonic() - start > time_budget:
                 break
 
             # Параллельный запрос нескольких страниц подряд
@@ -256,22 +265,20 @@ async def search_all_pages(
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Конец достигнут, только если ПОСЛЕДНЯЯ страница батча неполная.
-            # (search_gifts уже сделал retry, так что пустота = реальный конец.)
-            reached_end = False
+            empty = 0
             for batch in results:
                 if isinstance(batch, Exception) or not batch:
-                    reached_end = True
+                    empty += 1
                     continue
                 all_items.extend(batch)
-                if len(batch) < 20:
-                    reached_end = True
 
             if progress_callback:
                 await progress_callback(len(all_items), page)
 
             page += len(tasks)
-            if reached_end:
+            # Реальный конец коллекции — только если ВЕСЬ батч пуст.
+            # (search_gifts уже делает retry, поэтому пустой батч = конец, а не сбой.)
+            if empty >= len(tasks):
                 break
             await asyncio.sleep(0.03)
     return all_items

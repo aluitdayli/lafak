@@ -24,12 +24,7 @@ FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "5"))         # запро�
 SUBSCRIPTION_PRICE_TON = float(os.getenv("SUBSCRIPTION_PRICE_TON", "0.5"))
 TON_WALLET = os.getenv("TON_WALLET", "UQD-0F79RLLQRXuDU7DpNN1ndlK62iaPxdI4-7oF-odOsTLU")
 
-# CryptoBot (Crypto Pay API)
-CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "602302:AADZKT29XccvGmdmlDaNXrG0JUXNQWB5nCB")
-CRYPTOBOT_API = os.getenv("CRYPTOBOT_API", "https://pay.crypt.bot/api")
-CRYPTOBOT_ASSET = os.getenv("CRYPTOBOT_ASSET", "TON")
-
-# Встроенный HTTP-API для мини-аппа (статус подписки / создание счёта)
+# Встроенный HTTP-API для мини-аппа (статус подписки)
 WEBAPI_HOST = os.getenv("WEBAPI_HOST", "0.0.0.0")
 # Amvera направляет домен на порт 80 (или из env PORT). Для локали можно WEBAPI_PORT.
 WEBAPI_PORT = int(os.getenv("PORT", os.getenv("WEBAPI_PORT", "80")))
