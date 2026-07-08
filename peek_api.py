@@ -12,7 +12,16 @@ from typing import Optional
 
 import aiohttp
 
+try:
+    from config import PEEK_PROXY, PEEK_TIME_BUDGET
+except Exception:
+    PEEK_PROXY = ""
+    PEEK_TIME_BUDGET = 180
+
 logger = logging.getLogger(__name__)
+
+# Прокси для обхода блокировки IP (peek.tg режет некоторые хостинги).
+PROXY = PEEK_PROXY or None
 
 BASE_URL = "https://server.peek.tg/api/nft"
 HEADERS = {
@@ -145,7 +154,7 @@ def _cooldown_remaining_str(item: dict) -> str:
 async def fetch_gifts_list() -> list[str]:
     """Список всех коллекций (названий подарков)."""
     async with aiohttp.ClientSession(headers=HEADERS) as session:
-        async with session.get(f"{BASE_URL}/gifts", timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        async with session.get(f"{BASE_URL}/gifts", proxy=PROXY, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status != 200:
                 logger.error("peek.tg /gifts error: %d", resp.status)
                 return []
@@ -190,6 +199,7 @@ async def search_gifts(
                 async with session.get(
                     f"{BASE_URL}/gifts/search",
                     params=params,
+                    proxy=PROXY,
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status == 200:
@@ -237,11 +247,11 @@ async def search_gifts(
 async def search_all_pages(
     name: str,
     market_only: bool = False,
-    max_pages: int = 400,
+    max_pages: int = 3000,
     stop_event: asyncio.Event | None = None,
     progress_callback=None,
     concurrent: int = _DEFAULT_CONCURRENCY,
-    time_budget: float | None = 90.0,
+    time_budget: float | None = None,
 ) -> list[dict]:
     """
     Загружает все страницы результатов для коллекции.
@@ -253,6 +263,8 @@ async def search_all_pages(
     результатов, из-за чего режимы комбо/девушки/маркет/кулдаун/оригинал
     находили очень мало. `time_budget` не даёт зависнуть на огромных коллекциях.
     """
+    if time_budget is None:
+        time_budget = PEEK_TIME_BUDGET
     all_items = []
     start = time.monotonic()
     async with make_session() as session:
@@ -260,7 +272,7 @@ async def search_all_pages(
         while page <= max_pages:
             if stop_event and stop_event.is_set():
                 break
-            if time_budget is not None and time.monotonic() - start > time_budget:
+            if time_budget and time.monotonic() - start > time_budget:
                 break
 
             # Параллельный запрос нескольких страниц подряд

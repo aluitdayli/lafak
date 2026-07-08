@@ -40,7 +40,7 @@ from config import (
     NFT_COUNT_RANGES, DEFAULT_NFT_RANGE, MAX_NFT_HARD_CAP,
     CSV_DIR, TELEGRAM_API_SERVER, WEBAPP_URL,
     SUPPORT_USERNAME, FREE_DAILY_LIMIT, SUBSCRIPTION_PRICE_TON, TON_WALLET,
-    WEBAPI_ENABLED,
+    WEBAPI_ENABLED, PEEK_TIME_BUDGET,
 )
 from gifts_constants import ALL_COLLECTIONS, COLLECTION_MODELS, COLLECTION_BACKDROPS
 from emoji_ids import (
@@ -1825,7 +1825,7 @@ async def _do_peek_combo_scan(message: Message, gifts: list[str], country: str =
             async with sem:
                 if stop_ev.is_set():
                     return []
-                return await peek_api.search_all_pages(gift, max_pages=400, stop_event=stop_ev)
+                return await peek_api.search_all_pages(gift, max_pages=3000, stop_event=stop_ev)
 
         tasks = [asyncio.create_task(_load(g)) for g in gifts]
         done_n = 0
@@ -2178,7 +2178,7 @@ async def _do_non_upgraded_scan(message: Message, gift_name: str):
         )
 
         peek_results = await peek_api.search_all_pages(
-            gift_name, max_pages=400, stop_event=stop_ev,
+            gift_name, max_pages=3000, stop_event=stop_ev,
         )
 
         # Собираем ВСЕХ уникальных юзеров: текущие + previousOwner
@@ -3485,9 +3485,9 @@ async def _do_peek_country_scan(message: Message, gift: str, country: str):
         all_items = []
         found = []
         page = 0
-        max_pages = 300  # сканируем глубже
+        max_pages = 3000  # сканируем глубоко (лимитирует бюджет времени)
         _scan_start = time.time()
-        _TIME_BUDGET = 70  # сек на фазу peek — чтобы редкие страны не висли 10 мин
+        _TIME_BUDGET = PEEK_TIME_BUDGET  # сек на фазу peek (по умолч. ~3 мин)
 
         async with peek_api.make_session() as session:
             while page < max_pages:
@@ -3687,7 +3687,7 @@ async def _do_peek_girls_scan(message: Message, gift: str, country: str | None =
     try:
         # Загружаем все NFT коллекции
         all_items = await peek_api.search_all_pages(
-            gift, max_pages=400, stop_event=stop_ev,
+            gift, max_pages=3000, stop_event=stop_ev,
         )
 
         # Фильтр по стране (до гендера — так быстрее)
@@ -3818,7 +3818,7 @@ async def _do_peek_market_scan(message: Message, gift: str):
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, market_only=True, max_pages=400, stop_event=stop_ev,
+            gift, market_only=True, max_pages=3000, stop_event=stop_ev,
         )
 
         # Фильтруем — только внутренний маркет TG (за звёзды)
@@ -3899,7 +3899,7 @@ async def _do_peek_market_country_scan(message: Message, gift: str, country: str
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, market_only=True, max_pages=400, stop_event=stop_ev,
+            gift, market_only=True, max_pages=3000, stop_event=stop_ev,
         )
 
         # Фильтруем: маркет TG + страна
@@ -4001,7 +4001,7 @@ async def _do_peek_cooldown_scan(message: Message, gift: str, cd_status: str, co
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, max_pages=400, stop_event=stop_ev,
+            gift, max_pages=3000, stop_event=stop_ev,
         )
 
         # Фильтр по стране
@@ -4085,7 +4085,7 @@ async def _do_peek_original_scan(message: Message, gift: str):
 
     try:
         all_items = await peek_api.search_all_pages(
-            gift, max_pages=400, stop_event=stop_ev,
+            gift, max_pages=3000, stop_event=stop_ev,
         )
 
         original = peek_api.filter_original_owners(all_items)

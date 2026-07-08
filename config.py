@@ -43,6 +43,16 @@ REQUEST_TIMEOUT = 5
 DELAY_BETWEEN_BATCHES = 0
 PROGRESS_UPDATE_INTERVAL = 2  # секунд
 
+# Прокси для peek.tg (обход блокировки IP дата-центра).
+# peek.tg режет запросы с IP некоторых хостингов (Amvera → 403). Укажи HTTP(S)
+# прокси с чистым IP, и все запросы к peek.tg пойдут через него.
+# Формат: http://user:pass@host:port  или  http://host:port
+PEEK_PROXY = os.getenv("PEEK_PROXY", "")
+
+# Бюджет времени на фазу парсинга (сек). Больше = глубже скан = больше
+# результатов (но дольше). По умолчанию ~3 мин.
+PEEK_TIME_BUDGET = int(os.getenv("PEEK_TIME_BUDGET", "180"))
+
 # ── Рандомный парсинг ─────────────────────────
 RANDOM_COLLECTIONS_COUNT = 5
 RANDOM_ITEMS_PER_COLLECTION = 100
