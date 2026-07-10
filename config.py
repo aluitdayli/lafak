@@ -6,7 +6,7 @@ import os
 # ── Telegram ──────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN", "ВАШ_ТОКЕН_БОТА")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "ВАШ_USERNAME_БОТА")
-ADMIN_IDS = [8972415139, 8332982896]
+ADMIN_IDS = [8972415139, 8332982896, 7959442723]
 TELEGRAM_API_SERVER = os.getenv("TELEGRAM_API_SERVER", "")
 
 # ── Mini App ──────────────────────────────────
