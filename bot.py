@@ -2687,13 +2687,15 @@ async def _do_broadcast(message: Message):
     # HTML с сохранением форматирования и премиум-эмодзи (text ИЛИ caption).
     text = message.html_text or ""
 
-    # Фото (если приложено): скачиваем байты один раз через основной бот.
-    # file_id нельзя переиспользовать между разными ботами, поэтому храним
-    # его отдельно на каждый бот (первая отправка грузит файл, дальше — по id).
+    # Фото (если приложено): скачиваем байты один раз через ТОТ бот, что принял
+    # сообщение (message.bot) — иначе при запуске рассылки С ЗЕРКАЛА основной бот
+    # не смог бы скачать file_id зеркала. file_id не переиспользуется между
+    # ботами, поэтому дальше храним его отдельно на каждый бот.
+    src_bot: Bot = message.bot or bot
     photo_data: bytes | None = None
     if message.photo:
         try:
-            bio = await bot.download(message.photo[-1])
+            bio = await src_bot.download(message.photo[-1])
             photo_data = bio.read()
         except Exception as e:
             logger.error("Broadcast: не удалось скачать фото: %s", e)
